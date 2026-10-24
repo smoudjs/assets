@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+package-lock.json
+sandbox/compiled
+tests/assets
+tests/.tmp

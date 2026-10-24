@@ -1,0 +1,15 @@
+{
+  "source": "../tests/assets",
+  "destination": "./compiled",
+  "exclude": ["generate.mjs"],
+  "actions": [
+    "json",
+    "xml",
+    { "action": "atlas", "source": "sprites", "extrude": 1 },
+    { "action": "atlas", "source": "tiles", "destination": "atlases", "trim": false, "extrude": 2, "powerOfTwo": true },
+    { "action": "image", "source": "images/ui/icons", "format": "png", "density": 144, "destination": "#icons" },
+    { "action": "atlas", "source": "#icons", "padding": 4 },
+    { "action": "image", "source": "#rest" },
+    { "source": {"include": "spine", "exclude": ["*.json", "*.png"]}, "action": "copy" }
+  ]
+}

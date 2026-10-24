@@ -1,0 +1,86 @@
+{
+  "name": "@smoud/assets",
+  "version": "0.0.1",
+  "description": "One config. One command. All your game assets optimized. Image optimization, conversion, resizing and texture atlases for HTML5 games and playable ads.",
+  "keywords": [
+    "assets",
+    "asset-pipeline",
+    "images",
+    "optimization",
+    "compression",
+    "webp",
+    "png",
+    "jpeg",
+    "atlas",
+    "texture-atlas",
+    "spritesheet",
+    "texturepacker",
+    "sharp",
+    "html5",
+    "game",
+    "game-development",
+    "playable",
+    "playable-ads",
+    "cli"
+  ],
+  "homepage": "https://github.com/smoudjs/assets#readme",
+  "bugs": {
+    "url": "https://github.com/smoudjs/assets/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smoudjs/assets.git"
+  },
+  "license": "MIT",
+  "author": "Smoud",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "smoud-assets": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "presets",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "node --test tests/",
+    "sandbox": "node dist/cli.js build --config sandbox/assets.json --verbose",
+    "sandbox:js": "node sandbox/assets.js",
+    "typecheck": "tsc --noEmit",
+    "deploy": "npm run build && npm run test && npm publish --access public"
+  },
+  "dependencies": {
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/picomatch": "^4.0.3",
+    "picomatch": "^4.0.7",
+    "prettier": "^3.9.10",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}
