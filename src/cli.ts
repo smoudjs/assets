@@ -74,7 +74,7 @@ async function main(argv: string[]): Promise<number> {
           dryRun: Boolean(values['dry-run']),
           strict: Boolean(values.strict)
         });
-        process.stdout.write(`${formatReport(result, { verbose: Boolean(values.verbose), version })}\n`);
+        process.stdout.write(`${formatReport(result, { verbose: Boolean(values.verbose) })}\n`);
         return result.ok ? 0 : 1;
       } catch (error) {
         process.stderr.write(`${red(`error: ${(error as Error).message}`)}\n`);

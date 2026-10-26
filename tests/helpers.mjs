@@ -7,7 +7,7 @@ import { cp, mkdir, mkdtemp, readdir, readFile, rm, rmdir, stat, writeFile } fro
 import path from 'node:path';
 import { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { build } from '../dist/index.js';
+import { actions, build, finishAction, outputPath, resolveOptions, selectFiles } from '../dist/index.js';
 
 const TESTS = path.dirname(fileURLToPath(import.meta.url));
 
@@ -71,29 +71,34 @@ export async function scratchAssets() {
 }
 
 /**
- * A test action type that turns all its files into one group output, like an atlas does: a `.txt` listing the
+ * A test action that turns all its files into one group output, like an atlas does: a `.txt` listing the
  * input paths, named after the selected folder, plus a `.ref` holding the name the `.txt` gets on disk.
  */
-export const bundle = {
+export const bundle = actions.register({
   name: 'bundle',
-  version: '1',
   accepts: '*',
   options: {},
-  async process(files, _options, context) {
-    const name = context.folder || 'all';
+  async process({ source, destination }) {
+    const started = performance.now();
+    const { files, folder, warnings } = await selectFiles(source);
+    const name = folder || 'all';
+    const template = typeof destination === 'object' ? destination.filename : undefined;
     const list = { path: `${name}.txt`, data: Buffer.from(files.map((file) => file.path).join('\n')), meta: { size: 0 } };
-    const ref = { path: `${name}.ref`, data: Buffer.from(context.filename(list)), meta: { size: 0 } };
-    return [list, ref];
+    const ref = { path: `${name}.ref`, data: Buffer.from(outputPath(list, template)), meta: { size: 0 } };
+    return finishAction({ action: 'bundle', source, destination, inputs: files, outputs: [list, ref], warnings, errors: [], started });
   }
-};
+});
 
-/** A test action type that renames every file, so outputs differ from inputs without needing Sharp. */
-export const tag = {
+/** A test action that renames every file, so outputs differ from inputs without needing Sharp. */
+export const tag = actions.register({
   name: 'tag',
-  version: '1',
   accepts: '*',
   options: { suffix: { kind: 'string', description: 'appended before the extension', default: '-tagged' } },
-  async process(files, options) {
-    return files.map((file) => ({ ...file, path: file.path.replace(/(\.[^./]+)?$/, `${options.suffix}$1`) }));
+  async process({ source, destination, ...input }) {
+    const started = performance.now();
+    const options = resolveOptions(tag.options, input);
+    const { files, warnings } = await selectFiles(source);
+    const outputs = files.map((file) => ({ ...file, path: file.path.replace(/(\.[^./]+)?$/, `${options.suffix}$1`) }));
+    return finishAction({ action: 'tag', source, destination, inputs: files, outputs, warnings, errors: [], started });
   }
-};
+});

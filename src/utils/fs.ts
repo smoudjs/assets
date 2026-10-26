@@ -77,6 +77,16 @@ export async function exists(target: string): Promise<boolean> {
   }
 }
 
+export function samePath(a: string, b: string): boolean {
+  return path.relative(a, b) === '';
+}
+
+/** `filePath` strictly below `folder` at any depth; equal paths give false. Both absolute. */
+export function isPathUnderFolder(filePath: string, folder: string): boolean {
+  const relative = path.relative(folder, filePath);
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 export function toPosix(filePath: string): string {
   return filePath.replace(/\\/g, '/');
 }

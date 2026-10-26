@@ -1,6 +1,6 @@
 /**
- * Types of @smoud/assets: the config a user writes, the action-type interface an implementation
- * fulfils, and the result a build returns. Nothing here touches the filesystem.
+ * Types of @smoud/assets: the config a user writes, the action an implementation registers, the files that
+ * flow through, and the results that come back. Nothing here touches the filesystem.
  */
 
 // ---------------------------------------------------------------------------
@@ -13,18 +13,17 @@ export type SourcePattern = string;
 /** Numeric comparison as a string: `">200kb"`, `">=1024"`, `"<2mb"`. An array means every bound must hold. */
 export type Comparison = string | string[];
 
-/** Facts about a file that a `source` can filter on. */
+/**
+ * Facts a `source` filters on. `size` is always known. Every other key, like `width` or `alpha`, is answered
+ * by the probe of the action that selects, and is compared as a boolean or as a `Comparison`.
+ */
 export interface WhenSpec {
-  alpha?: boolean;
-  animated?: boolean;
-  /** With unit: `b`, `kb`, `mb`. */
   size?: Comparison;
-  width?: Comparison;
-  height?: Comparison;
+  [fact: string]: boolean | Comparison | undefined;
 }
 
 export interface SourceSpec {
-  /** Omitted: every file under the base source folder that the action type can handle. */
+  /** Omitted: every file under the base source folder that the action can handle. */
   include?: SourcePattern | SourcePattern[];
   /** Always wins over `include`. */
   exclude?: SourcePattern | SourcePattern[];
@@ -35,16 +34,16 @@ export interface SourceSpec {
 export type Source = SourcePattern | SourcePattern[] | SourceSpec;
 
 export interface DestinationSpec {
-  /** Relative to the base destination folder, or a `#virtual` folder. Omitted: mirror the source tree. */
+  /** A folder, or a `#virtual` folder that stays in memory. Omitted in a config: mirror the source tree. */
   folder?: string;
   /** Tokens: `[name]`, `[ext]`, `[hash]` (8 chars), `[hash:n]`. Default `[name][ext]`. */
   filename?: string;
 }
 
-/** `"destination": "ui"` is shorthand for `{ "folder": "ui" }`. An array writes to several places. */
-export type Destination = string | DestinationSpec | Array<string | DestinationSpec>;
+/** `"destination": "ui"` is shorthand for `{ "folder": "ui" }`. */
+export type Destination = string | DestinationSpec;
 
-/** The reserved keys of an action. Everything else on the object belongs to the action type. */
+/** The reserved keys of an action entry. Everything else on the object is an option of the action. */
 export interface ActionBase {
   action: string;
   source?: Source;
@@ -63,10 +62,10 @@ export interface PresetEntry {
   defaults?: Defaults;
 }
 
-/** A string is an action type with default settings: `"image"` equals `{ "action": "image" }`. */
+/** A string is an action with default settings: `"image"` equals `{ "action": "image" }`. */
 export type ActionEntry = string | ActionConfig | PresetEntry;
 
-/** Starting options per action type, e.g. `{ "image": { "quality": 80 } }`. */
+/** Option overrides per action name, e.g. `{ "image": { "quality": 80 } }`. Unknown names and options are errors. */
 export type Defaults = Record<string, Record<string, unknown>>;
 
 /** assets.json. A preset file has the same shape. */
@@ -80,8 +79,6 @@ export interface AssetsConfig {
   defaults?: Defaults;
   /** Omitted: the built-in `default` preset's actions. */
   actions?: ActionEntry[];
-  /** `true` (default), `false`, or a cache directory. */
-  cache?: boolean | string;
   /** Remove stale files from the destination after a successful build. Default `true`. */
   clean?: boolean;
 }
@@ -90,36 +87,37 @@ export interface AssetsConfig {
 // Files in the pipeline
 // ---------------------------------------------------------------------------
 
-/** `size` is always known; the rest is filled by a type's probe when `when` needs it. */
-export interface AssetMeta {
+/** What a probe knows about a file: `{ width: 64, alpha: true }` for an image. */
+export type Facts = Record<string, number | boolean | string | undefined>;
+
+/** `size` is always known; the rest comes from a probe when a `when` needs it. */
+export interface AssetMeta extends Facts {
   size: number;
-  /** `png`, `jpeg`, `webp`, `gif`, `svg`, ... */
-  format?: string;
-  width?: number;
-  height?: number;
-  alpha?: boolean;
-  animated?: boolean;
 }
 
-/** Pure data. Processors receive and return these and never touch disk. */
+/** Pure data. Actions receive and return these; only `selectFiles` and `writeFiles` touch disk. */
 export interface AssetFile {
   /** Posix path relative to the folder it was selected from. */
   path: string;
   data: Buffer;
   meta: AssetMeta;
-  /** Values for filename tokens. A type may set `hash` so that linked outputs, like an atlas page and its JSON, share one. */
+  /** Where it came from: relative to the root it was selected from, or `#name/path`. Set by `selectFiles`. */
+  origin?: string;
+  /** Folder part of the pattern that selected it, put back when a destination mirrors the source tree. Set by `selectFiles`. */
+  base?: string;
+  /** Values for filename tokens. An action may set `hash` so that linked outputs, like an atlas page and its JSON, share one. */
   tokens?: Record<string, string | number>;
-  /** Set when a type emitted the original bytes because re-encoding would have grown the file. */
+  /** The original bytes were kept because the processed result would have been bigger. */
   keptOriginal?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Action types
+// Actions
 // ---------------------------------------------------------------------------
 
 export type OptionKind = 'boolean' | 'number' | 'string' | 'enum' | 'object' | 'list' | 'oneOf';
 
-/** One table per type drives validation, the editor schema and `--help`. */
+/** One table per action drives validation, defaults, the editor schema and `--help`. */
 export interface OptionDescriptor {
   kind: OptionKind;
   description: string;
@@ -139,37 +137,31 @@ export interface OptionDescriptor {
 
 export type OptionTable = Record<string, OptionDescriptor>;
 
-export interface ProcessContext {
-  /**
-   * Name of the folder all files were selected from: `"ui"` for `"source": "images/ui"`, the virtual folder's
-   * name for `"#icons"`, `""` when the files come from several folders. Group outputs such as an atlas are named after it.
-   */
-  folder: string;
-  /** The name an output will have on disk, after the destination's `filename` template. An atlas JSON names its image with it. */
-  filename(file: AssetFile): string;
-  /** Warn about the current action. The build continues. */
-  warn(message: string): void;
-  /** Report a broken file. The build continues, nothing is committed. */
-  fail(file: AssetFile, message: string): void;
-  /** How many files may be processed at the same time. */
-  concurrency: number;
+/** Reads facts out of a file's bytes so a `when` can filter on them. */
+export type Probe = (data: Buffer) => Promise<Facts>;
+
+/** What every `process` takes, next to the action's own options: `process({ source, destination, quality: 80 })`. */
+export interface ProcessParams {
+  /** A pattern, folder, file or spec relative to the working directory, or files already in memory. */
+  source: Source | AssetFile[];
+  /** A folder, or a `#virtual` folder. Omitted: nothing is written and the outputs come back on the result. */
+  destination?: Destination;
 }
 
 /**
- * `image`, `copy`, later `atlas`, `audio`, ... Pure by contract: files and options in, files out.
- * Finding, filtering and writing belong to the engine.
+ * An action: what `actions.register` takes and what `actions.<name>` holds. `process` is the one required
+ * function and has the same parameters and result for every action. Raw functions such as `packAtlas` sit
+ * next to it under their own names.
  */
-export interface ActionType<O extends Record<string, unknown> = Record<string, unknown>> {
+export interface ActionDefinition<O extends Record<string, unknown> = Record<string, unknown>> {
   /** The word users write after `"action":`. */
   name: string;
-  /** Bumped whenever output for identical input and options could change. Part of the cache key. */
-  version: string;
-  /** Lower-case extensions without the dot this type can handle, or `'*'` for every file. */
+  /** Lower-case extensions without the dot this action handles, or `'*'` for every file. */
   accepts: readonly string[] | '*';
   options: OptionTable;
-  /** Optional: fill `width`, `alpha`, ... so `when` can filter on them. */
-  probe?(file: AssetFile): Promise<Partial<AssetMeta>>;
-  process(files: AssetFile[], options: O, context: ProcessContext): Promise<AssetFile[]>;
+  /** Optional: answers `when` keys other than `size`. */
+  probe?: Probe;
+  process(input: ProcessParams & Partial<O>): Promise<ActionResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,49 +169,53 @@ export interface ActionType<O extends Record<string, unknown> = Record<string, u
 // ---------------------------------------------------------------------------
 
 export interface FileResult {
-  /** 1-based position of the action in the expanded plan. */
-  action: number;
-  /** Relative to the base source, or `#virtual/path`. */
+  /** Relative to the root it was selected from, or `#virtual/path`. */
   source: string;
-  /** Relative to the base destination, or `#virtual/path`. */
+  /** Relative to the destination folder, or `#virtual/path`. */
   outputs: string[];
   bytesIn: number;
   bytesOut: number;
-  cached: boolean;
   keptOriginal: boolean;
 }
 
+/** What `process` returns and what the report prints. A build holds one per action. */
 export interface ActionResult {
-  index: number;
+  /** No errors. */
+  ok: boolean;
+  /** The action's name. */
+  action: string;
   /** e.g. `image, source "ui"` */
   label: string;
-  type: string;
   /** How many source files the action received. */
   selected: number;
-  /** One per source file, or one for all of them when the type packs its files into group outputs (atlas). */
+  /** The virtual folder the files came from, or `memory` for files handed in directly. Those bytes are not source bytes. */
+  virtualSource?: string;
+  /** One per source file, or one for all of them when the action packs its files into group outputs (atlas). */
   files: FileResult[];
+  /** The produced files, in memory. */
+  outputs: AssetFile[];
+  /** Absolute folder written to; null when the outputs stayed in memory. */
+  destination: string | null;
   bytesIn: number;
   bytesOut: number;
+  warnings: string[];
+  errors: string[];
   /** Milliseconds. */
   duration: number;
 }
 
 export interface BuildResult {
-  /** No errors. Warnings do not make it false unless `strict`. */
+  /** No errors, and no warnings when `strict`. */
   ok: boolean;
   dryRun: boolean;
-  /** Absolute base folders. `destination` is null for an in-memory standalone call. */
+  /** Absolute base folders. */
   source: string;
-  destination: string | null;
+  destination: string;
   actions: ActionResult[];
   /** Source files no action selected, relative to the base source. */
   unselected: string[];
   warnings: string[];
   errors: string[];
-  /** In-memory results of a standalone call made without a destination. */
-  outputs: AssetFile[];
-  /** Every virtual folder the build produced, by name without `#`. */
-  virtual: Record<string, AssetFile[]>;
   /** Milliseconds. */
   duration: number;
 }

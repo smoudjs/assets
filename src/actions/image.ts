@@ -1,7 +1,10 @@
 // One Sharp pipeline per file, always in this order: trim → resize → flatten → encode.
 
 import sharp, { type Metadata, type OutputInfo, type Sharp } from 'sharp';
-import type { ActionType, AssetFile, AssetMeta, OptionTable, ProcessContext } from '../types.js';
+import type { ActionDefinition, Facts, OptionTable } from '../types.js';
+import { finishAction, resolveOptions, transformFiles } from './index.js';
+import { selectFiles } from '../files.js';
+import { extension } from '../utils/fs.js';
 
 type Format = 'png' | 'jpeg' | 'webp' | 'avif' | 'gif';
 const FORMATS: Format[] = ['png', 'jpeg', 'webp', 'avif', 'gif'];
@@ -33,6 +36,29 @@ export interface ImageOptions extends Record<string, unknown> {
   webp: { alphaQuality: number; nearLossless: boolean; smartSubsample: boolean; effort: number };
   avif: { chromaSubsampling: '4:2:0' | '4:4:4'; effort: number };
   gif: { colors: number; dither: number; effort: number };
+}
+
+/** What `optimizeImage` returns: the encoded bytes and what they are. */
+export interface OptimizedImage {
+  data: Buffer;
+  format: Format;
+  width: number;
+  height: number;
+  alpha: boolean;
+  animated: boolean;
+  /** The original bytes were kept because re-encoding would have grown the file. */
+  keptOriginal: boolean;
+  warnings: string[];
+}
+
+export interface ImageAction extends ActionDefinition<ImageOptions> {
+  /** Format, width, height, alpha and animated of an image, read from its header. Also the probe for `when`. */
+  readImageMeta(data: Buffer): Promise<Facts>;
+  /**
+   * Trim, resize, flatten and encode one image. Returns null when the source format cannot be kept (svg and
+   * other vector sources) and no raster `format` was asked for.
+   */
+  optimizeImage(data: Buffer, options?: Partial<ImageOptions>): Promise<OptimizedImage | null>;
 }
 
 const formatValues = { kind: 'enum', values: FORMATS, description: 'Output format' } as const;
@@ -136,90 +162,98 @@ const options: OptionTable = {
   }
 };
 
-export const image: ActionType<ImageOptions> = {
+/** Resize, trim, convert and compress images with Sharp. */
+export const image: ImageAction = {
   name: 'image',
-  version: '1',
   accepts: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'tif', 'tiff', 'svg'],
   options,
 
-  async probe(file) {
-    return facts(await sharp(file.data).metadata());
+  async readImageMeta(data) {
+    return facts(await sharp(data).metadata());
   },
 
-  async process(files, options, context) {
-    const results: AssetFile[] = [];
-    let next = 0;
-    const worker = async () => {
-      while (next < files.length) {
-        const file = files[next++] as AssetFile;
-        try {
-          const output = await processOne(file, options, context);
-          if (output) results.push(output);
-        } catch (error) {
-          context.fail(file, (error as Error).message);
-        }
+  probe(data) {
+    return image.readImageMeta(data);
+  },
+
+  async optimizeImage(data, input = {}) {
+    const options = resolveOptions<ImageOptions>(image.options, input);
+    const warnings: string[] = [];
+    const meta = await sharp(data).metadata();
+    const source = normalizeFormat(meta.format);
+    const animated = options.animated && (meta.pages ?? 1) > 1;
+
+    let candidates: Format[];
+    if (options.format === undefined) {
+      if (!source) return null;
+      candidates = [source];
+    } else {
+      candidates = Array.isArray(options.format) ? options.format : [options.format];
+    }
+    if (meta.hasAlpha && !options.flatten && candidates.length > 1) candidates = candidates.filter((format) => format !== 'jpeg');
+    if (meta.hasAlpha && !options.flatten && candidates.length === 1 && candidates[0] === 'jpeg') {
+      warnings.push('jpeg cannot hold alpha; flattened onto black (set "flatten" to choose the colour)');
+    }
+
+    // Pure re-encode: same format, no pixel change. Only then can the original stand in for the result.
+    const pureReencode =
+      !resizes(options) && !options.trim && !options.flatten && source !== null && !(animated && !options.animated);
+
+    let best: Candidate | undefined;
+    for (const format of candidates) {
+      const keepFrames = animated && ANIMATED.includes(format);
+      let pipeline = sharp(data, { animated: keepFrames, density: options.density }).rotate();
+      pipeline = applyTrim(pipeline, options);
+      pipeline = applyResize(pipeline, options, meta);
+      if (options.flatten || format === 'jpeg') pipeline = pipeline.flatten({ background: options.flatten ?? '#000000' });
+      if (options.metadata) pipeline = pipeline.withMetadata();
+      pipeline = encode(pipeline, format, options);
+
+      const encoded = await pipeline.toBuffer({ resolveWithObject: true });
+      let candidate: Candidate = { format, data: encoded.data, info: encoded.info, kept: false };
+      if (options.keepSmaller && pureReencode && format === source && data.length <= encoded.data.length) {
+        candidate = { format, data, info: { ...encoded.info, size: data.length }, kept: true };
       }
+      if (!best || candidate.data.length < best.data.length) best = candidate;
+    }
+    if (!best) return null;
+
+    return {
+      data: best.data,
+      format: best.format,
+      width: best.info.width,
+      height: best.kept ? (meta.height as number) : (best.info.pageHeight ?? best.info.height),
+      alpha: best.kept ? (meta.hasAlpha ?? false) : best.info.channels === 4,
+      animated: best.kept ? animated : (best.info.pages ?? 1) > 1,
+      keptOriginal: best.kept,
+      warnings
     };
-    await Promise.all(Array.from({ length: Math.min(context.concurrency, files.length) }, worker));
-    return results;
+  },
+
+  async process({ source, destination, ...input }) {
+    const started = performance.now();
+    const options = resolveOptions<ImageOptions>(image.options, input);
+    const { files, warnings } = await selectFiles(source, { accepts: image.accepts, probe: image.readImageMeta });
+    const errors: string[] = [];
+    const outputs = await transformFiles(
+      files,
+      async (file) => {
+        const name = file.origin ?? file.path;
+        const result = await image.optimizeImage(file.data, options);
+        if (!result) {
+          warnings.push(`${name}: svg and other vector sources need a raster "format"; skipped`);
+          return null;
+        }
+        for (const warning of result.warnings) warnings.push(`${name}: ${warning}`);
+        const { data, format, width, height, alpha, animated, keptOriginal } = result;
+        const path = format === formatOfExtension(file.path) ? file.path : file.path.replace(/\.[^./]+$/, '') + EXTENSIONS[format];
+        return { ...file, path, data, meta: { ...file.meta, format, width, height, alpha, animated }, keptOriginal };
+      },
+      errors
+    );
+    return finishAction({ action: image.name, source, destination, inputs: files, outputs, warnings, errors, started });
   }
 };
-
-async function processOne(file: AssetFile, options: ImageOptions, context: ProcessContext): Promise<AssetFile | null> {
-  const meta = await sharp(file.data).metadata();
-  const source = normalizeFormat(meta.format);
-  const animated = options.animated && (meta.pages ?? 1) > 1;
-
-  let candidates: Format[];
-  if (options.format === undefined) {
-    if (!source) {
-      context.warn(`${file.path}: svg and other vector sources need a raster "format"; skipped`);
-      return null;
-    }
-    candidates = [source];
-  } else {
-    candidates = Array.isArray(options.format) ? options.format : [options.format];
-  }
-  if (meta.hasAlpha && !options.flatten && candidates.length > 1)
-    candidates = candidates.filter((format) => format !== 'jpeg');
-  if (meta.hasAlpha && !options.flatten && candidates.length === 1 && candidates[0] === 'jpeg') {
-    context.warn(`${file.path}: jpeg cannot hold alpha; flattened onto black (set "flatten" to choose the colour)`);
-  }
-
-  // Pure re-encode: same format, no pixel change. Only then can the original stand in for the result.
-  const pureReencode =
-    !resizes(options) && !options.trim && !options.flatten && source !== null && !(animated && !options.animated);
-
-  let best: Candidate | undefined;
-  for (const format of candidates) {
-    const keepFrames = animated && ANIMATED.includes(format);
-    let pipeline = sharp(file.data, { animated: keepFrames, density: options.density }).rotate();
-    pipeline = applyTrim(pipeline, options);
-    pipeline = applyResize(pipeline, options, meta);
-    if (options.flatten || format === 'jpeg') pipeline = pipeline.flatten({ background: options.flatten ?? '#000000' });
-    if (options.metadata) pipeline = pipeline.withMetadata();
-    pipeline = encode(pipeline, format, options);
-
-    const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
-    let candidate: Candidate = { format, data, info, kept: false };
-    if (options.keepSmaller && pureReencode && format === source && file.data.length <= data.length) {
-      candidate = { format, data: file.data, info: { ...info, size: file.data.length }, kept: true };
-    }
-    if (!best || candidate.data.length < best.data.length) best = candidate;
-  }
-  if (!best) return null;
-
-  const path = best.format === source ? file.path : file.path.replace(/\.[^./]+$/, '') + EXTENSIONS[best.format];
-  const outMeta: AssetMeta = {
-    size: best.data.length,
-    format: best.format,
-    width: best.info.width,
-    height: best.kept ? meta.height : (best.info.pageHeight ?? best.info.height),
-    alpha: best.kept ? meta.hasAlpha : best.info.channels === 4,
-    animated: best.kept ? animated : (best.info.pages ?? 1) > 1
-  };
-  return { ...file, path, data: best.data, meta: outMeta, keptOriginal: best.kept };
-}
 
 interface Candidate {
   format: Format;
@@ -235,7 +269,7 @@ function applyTrim(pipeline: Sharp, options: ImageOptions): Sharp {
     : pipeline.trim();
 }
 
-// The engine fills `resize` with its defaults even when the config never mentions it, so "no resize" means no dimension given.
+// `resize` is filled with its defaults even when never mentioned, so "no resize" means no dimension given.
 function resizes(options: ImageOptions): boolean {
   const resize = options.resize;
   return resize !== undefined && (resize.width ?? resize.height ?? resize.scale) !== undefined;
@@ -308,7 +342,12 @@ function normalizeFormat(format: string | undefined): Format | null {
   return FORMATS.includes(format as Format) ? (format as Format) : null;
 }
 
-function facts(meta: Metadata): Partial<AssetMeta> {
+/** The format a file name claims, so a kept format keeps its own extension (`.jpg` stays `.jpg`). */
+function formatOfExtension(filePath: string): Format | null {
+  return normalizeFormat(extension(filePath));
+}
+
+function facts(meta: Metadata): Facts {
   return {
     format: normalizeFormat(meta.format) ?? meta.format,
     width: meta.width,

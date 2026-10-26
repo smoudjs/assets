@@ -1,6 +1,6 @@
 {
   "name": "@smoud/assets",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "One config. One command. All your game assets optimized. Image optimization, conversion, resizing and texture atlases for HTML5 games and playable ads.",
   "keywords": [
     "assets",

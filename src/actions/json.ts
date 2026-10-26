@@ -1,21 +1,32 @@
-import type { ActionType } from '../types.js';
+import type { ActionDefinition } from '../types.js';
+import { finishAction, resolveOptions, transformFiles } from './index.js';
+import { selectFiles } from '../files.js';
 
-/** Minifies JSON: parse, then serialize without spaces or line breaks. Invalid files fail. */
-export const json: ActionType = {
+export interface JsonAction extends ActionDefinition {
+  /** Parses and re-serializes JSON without spaces or line breaks. Invalid JSON throws. */
+  minifyJson(data: Buffer): Buffer;
+}
+
+/** Minifies JSON files. */
+export const json: JsonAction = {
   name: 'json',
-  version: '1',
   accepts: ['json'],
   options: {},
-  async process(files, _options, context) {
-    const results = [];
-    for (const file of files) {
-      try {
-        const data = Buffer.from(JSON.stringify(JSON.parse(file.data.toString('utf8'))));
-        results.push({ ...file, data, meta: { ...file.meta, size: data.length } });
-      } catch (error) {
-        context.fail(file, `invalid JSON: ${(error as Error).message}`);
-      }
+
+  minifyJson(data) {
+    try {
+      return Buffer.from(JSON.stringify(JSON.parse(data.toString('utf8'))));
+    } catch (error) {
+      throw new Error(`invalid JSON: ${(error as Error).message}`);
     }
-    return results;
+  },
+
+  async process({ source, destination, ...options }) {
+    const started = performance.now();
+    resolveOptions(json.options, options);
+    const { files, warnings } = await selectFiles(source, { accepts: json.accepts });
+    const errors: string[] = [];
+    const outputs = await transformFiles(files, async (file) => ({ ...file, data: json.minifyJson(file.data) }), errors);
+    return finishAction({ action: json.name, source, destination, inputs: files, outputs, warnings, errors, started });
   }
 };

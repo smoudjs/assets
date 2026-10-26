@@ -122,7 +122,7 @@ describe('atlas', () => {
 
 describe('atlas()', () => {
   it('returns the page and its JSON in memory', async () => {
-    const result = await atlas({ source: 'tests/assets/tiles' });
+    const result = await atlas.process({ source: 'tests/assets/tiles' });
     assert.equal(result.ok, true, result.errors.join('\n'));
     assert.deepEqual(result.outputs.map((file) => file.path).sort(), ['tiles.json', 'tiles.png']);
     const json = result.outputs.find((file) => file.path === 'tiles.json');

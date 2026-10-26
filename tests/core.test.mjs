@@ -133,7 +133,7 @@ describe('core', () => {
   });
 
   it('warns when a catch-all overlaps another action', async () => {
-    const { result, outputs } = await run({ actions: ['tag', { action: 'copy', source: 'data' }] }, { types: { tag } });
+    const { result, outputs } = await run({ actions: [tag.name, { action: 'copy', source: 'data' }] });
     assert.equal(result.ok, true, result.errors.join('\n'));
     assert.ok(result.warnings.some((w) => w.includes('also selected') && w.includes('#rest')), result.warnings.join('\n'));
     const files = await outputs();
@@ -142,15 +142,12 @@ describe('core', () => {
   });
 
   it('group outputs land at the root, named after the selected folder, and know their final filename', async () => {
-    const { result, outputs, read } = await run(
-      {
-        actions: [
-          { action: 'bundle', source: 'tiles' },
-          { action: 'bundle', source: ['data', 'spine'], destination: { folder: 'misc', filename: '[name].[hash:4][ext]' } }
-        ]
-      },
-      { types: { bundle } }
-    );
+    const { result, outputs, read } = await run({
+      actions: [
+        { action: bundle.name, source: 'tiles' },
+        { action: bundle.name, source: ['data', 'spine'], destination: { folder: 'misc', filename: '[name].[hash:4][ext]' } }
+      ]
+    });
     assert.equal(result.ok, true, result.errors.join('\n'));
     const files = await outputs();
     assert.ok(files.includes('tiles.txt') && files.includes('tiles.ref'), files.join('\n'));

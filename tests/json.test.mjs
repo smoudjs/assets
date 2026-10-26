@@ -22,7 +22,7 @@ describe('json', () => {
   });
 
   it('works in memory', async () => {
-    const result = await json({ source: 'tests/assets/data/levels' });
+    const result = await json.process({ source: 'tests/assets/data/levels' });
     assert.equal(result.ok, true);
     assert.deepEqual(
       result.outputs.map((file) => file.data.toString()),

@@ -124,18 +124,6 @@ Add `--verbose` for one line per file.
 | `actions`     | The list of actions, run top to bottom. Omitted: the built-in `default` preset.                                         | preset `default`  |
 | `clean`       | Remove files from the destination that this build did not produce.                                                     | `true`            |
 
-The config can also be JavaScript (`assets.js`, `.mjs` or `.cjs`) exporting the same object:
-
-```js
-import { defineConfig } from '@smoud/assets';
-
-export default defineConfig({
-  actions: [{ action: 'image', source: 'ui', format: 'webp' }, { action: 'copy', source: '#rest' }]
-});
-```
-
-Run it with `npx smoud-assets build --config assets.js`.
-
 ### Actions
 
 An action is one line of the pipeline: which files, what to do with them, where to put them.
@@ -308,7 +296,7 @@ npx smoud-assets build [options]
 
 | Option                | Description                                                              | Default           |
 | --------------------- | ------------------------------------------------------------------------ | ----------------- |
-| `--config <file>`     | Config file (`.json`, `.js`, `.mjs`, `.cjs`).                            | `assets.json`     |
+| `--config <file>`     | Config file.                                                             | `assets.json`     |
 | `--source <dir>`      | Base source folder, relative to the working directory.                   | from the config   |
 | `--destination <dir>` | Base destination folder, relative to the working directory.              | from the config   |
 | `--preset <name>`     | Run a preset instead of the config file.                                 |                   |
@@ -426,7 +414,7 @@ Accepts every file. Copies it unchanged. No options.
 ## API
 
 ```js
-import { build, formatReport, defineConfig, image, atlas, json, xml, copy, version } from '@smoud/assets';
+import { build, formatReport, image, atlas, json, xml, copy, version } from '@smoud/assets';
 ```
 
 CommonJS works the same way with `require('@smoud/assets')`. Types are included.
@@ -471,10 +459,6 @@ if (!result.ok) process.exit(1);
 ### `formatReport(result, options?)`
 
 The terminal report the CLI prints, as a string. Options: `verbose` (one line per file) and `version` (shown in the first line).
-
-### `defineConfig(config)`
-
-Returns the config unchanged. Gives JavaScript config files autocomplete and type checking.
 
 ### `image()`, `atlas()`, `json()`, `xml()`, `copy()`
 

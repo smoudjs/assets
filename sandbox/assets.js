@@ -1,19 +1,30 @@
-// The sandbox as JavaScript: the same actions as assets.json, called one by one.
+// The sandbox as JavaScript: the same actions as assets.json, called one by one through the public API.
 // Run: npm run sandbox:js
 
-import { copy, formatReport, image, json, xml } from '../dist/index.js';
+import { atlas, copy, formatReport, image, json, xml } from '../dist/index.js';
 
 const source = 'tests/assets';
-const destination = 'sandbox/compiled';
+const destination = 'sandbox/compiled-js';
 
 async function main() {
+  // no destination: the rasterized icons stay in memory and go straight into the atlas, like "#icons" in assets.json
+  const icons = await image.process({ source: `${source}/images/ui/icons`, format: 'png', density: 144 });
+
   const results = [
-    await json({ source, destination }),
-    await xml({ source, destination }),
-    await image({ source, destination, format: 'webp', quality: 80 }),
-    await copy({ source: { include: `${source}/spine`, exclude: ['*.json', '*.png'] }, destination: `${destination}/spine` })
+    await json.process({ source, destination }),
+    await xml.process({ source, destination }),
+    await atlas.process({ source: `${source}/sprites`, destination, extrude: 1 }),
+    await atlas.process({ source: `${source}/tiles`, destination: `${destination}/atlases`, trim: false, extrude: 2, powerOfTwo: true }),
+    icons,
+    await atlas.process({ source: icons.outputs, destination, padding: 4 }),
+    // "#rest" exists only in a build; here the folders handled above are excluded by hand
+    await image.process({
+      source: { include: source, exclude: [`${source}/sprites`, `${source}/tiles`, `${source}/images/ui/icons`] },
+      destination
+    }),
+    await copy.process({ source: { include: `${source}/spine`, exclude: ['*.json', '*.png'] }, destination: `${destination}/spine` })
   ];
-  for (const result of results) console.log(formatReport(result));
+  console.log(formatReport(results, {verbose: true}));
 }
 
 await main();

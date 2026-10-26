@@ -3,7 +3,9 @@
 // copies, so a frame cut back out of a page is pixel-identical to its trimmed source.
 
 import sharp from 'sharp';
-import type { ActionType, AssetFile, OptionTable, ProcessContext } from '../types.js';
+import type { ActionDefinition, AssetFile, OptionTable } from '../types.js';
+import { finishAction, resolveOptions } from './index.js';
+import { normalizeDestination, outputPath, selectFiles } from '../files.js';
 import { contentHash } from '../utils/fs.js';
 
 type PageFormat = 'png' | 'jpeg' | 'webp' | 'avif';
@@ -19,6 +21,45 @@ export interface AtlasOptions extends Record<string, unknown> {
   powerOfTwo: boolean;
   format: PageFormat;
   quality: number;
+}
+
+export interface AtlasSprite {
+  /** Frame name, e.g. `hero/idle_01`. */
+  name: string;
+  data: Buffer;
+}
+
+/** One frame of the TexturePacker JSON hash format. */
+export interface AtlasFrame {
+  frame: { x: number; y: number; w: number; h: number };
+  rotated: false;
+  trimmed: boolean;
+  spriteSourceSize: { x: number; y: number; w: number; h: number };
+  sourceSize: { w: number; h: number };
+}
+
+export interface AtlasPage {
+  /** The encoded page. */
+  image: Buffer;
+  width: number;
+  height: number;
+  /** Frames by name, sorted by name for stable output. */
+  frames: Record<string, AtlasFrame>;
+}
+
+export interface PackedAtlas {
+  pages: AtlasPage[];
+  warnings: string[];
+  /** Sprites that could not be packed, with the reason. */
+  errors: Array<{ sprite: string; message: string }>;
+}
+
+export interface AtlasAction extends ActionDefinition<AtlasOptions> {
+  /**
+   * Packs sprites into as few pages as fit. Sprites go in largest first, so the same input always gives the
+   * same pages. A sprite that fails to decode or does not fit a page is reported in `errors` and left out.
+   */
+  packAtlas(sprites: AtlasSprite[], options?: Partial<AtlasOptions>): Promise<PackedAtlas>;
 }
 
 const options: OptionTable = {
@@ -47,57 +88,88 @@ const options: OptionTable = {
   quality: { kind: 'number', description: 'Quality for jpeg, webp and avif pages', min: 1, max: 100, default: 85 }
 };
 
-export const atlas: ActionType<AtlasOptions> = {
+/** Packs sprites into texture atlas pages with a TexturePacker-style JSON per page. */
+export const atlas: AtlasAction = {
   name: 'atlas',
-  version: '1',
   accepts: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'tif', 'tiff'],
   options,
 
-  async process(files, options, context) {
-    const decoded = await Promise.all(
-      files.map((file) =>
-        decodeSprite(file, options.trim, context).catch((error: Error) => {
-          context.fail(file, error.message);
-          return null;
-        })
-      )
-    );
-    const sprites = decoded.filter((sprite): sprite is Sprite => sprite !== null);
+  async packAtlas(sprites, input = {}) {
+    const options = resolveOptions<AtlasOptions>(atlas.options, input);
+    const warnings: string[] = [];
+    const errors: Array<{ sprite: string; message: string }> = [];
+
+    const decoded: Sprite[] = [];
     const names = new Set<string>();
     for (const sprite of sprites) {
-      if (names.has(sprite.name)) context.fail(sprite.file, `frame "${sprite.name}" exists twice (same name, other extension)`);
+      if (names.has(sprite.name)) {
+        errors.push({ sprite: sprite.name, message: `frame "${sprite.name}" exists twice (same name, other extension)` });
+        continue;
+      }
       names.add(sprite.name);
+      try {
+        decoded.push(await decodeSprite(sprite, options.trim, warnings));
+      } catch (error) {
+        errors.push({ sprite: sprite.name, message: (error as Error).message });
+      }
     }
 
-    const pages = packPages(sprites, options, context);
-    if (!pages.length) return [];
-    const name = options.name ?? (context.folder || 'atlas');
+    const pages = packPages(decoded, options, errors);
     if (pages.length > 1) {
-      context.warn(
-        `${sprites.length} sprites do not fit one ${options.maxWidth}×${options.maxHeight} page; ${pages.length} pages written`
-      );
+      warnings.push(`${decoded.length} sprites do not fit one ${options.maxWidth}×${options.maxHeight} page; ${pages.length} pages`);
     }
+    const encoded: AtlasPage[] = [];
+    for (const page of pages) {
+      encoded.push({
+        image: await encodePage(composePage(page, options), page, options),
+        width: page.width,
+        height: page.height,
+        frames: describeFrames(page, options.extrude)
+      });
+    }
+    return { pages: encoded, warnings, errors };
+  },
 
-    const outputs: Array<{ page: Page; image: AssetFile; json: AssetFile }> = [];
-    for (const [index, page] of pages.entries()) {
-      const stem = pages.length > 1 ? `${name}_${index + 1}` : name;
-      const data = await encodePage(composePage(page, options), page, options);
+  async process({ source, destination, ...input }) {
+    const started = performance.now();
+    const options = resolveOptions<AtlasOptions>(atlas.options, input);
+    const { files, folder, warnings } = await selectFiles(source, { accepts: atlas.accepts });
+    const spriteName = (file: AssetFile) => file.path.replace(/\.[^./]+$/, '');
+    const packed = await atlas.packAtlas(
+      files.map((file) => ({ name: spriteName(file), data: file.data })),
+      options
+    );
+    const fileOf = new Map(files.map((file) => [spriteName(file), file]));
+    const errors = packed.errors.map(({ sprite, message }) => `${fileOf.get(sprite)?.origin ?? sprite}: ${message}`);
+    warnings.push(...packed.warnings);
+
+    const name = options.name ?? (folder || 'atlas');
+    const { filename } = normalizeDestination(destination);
+    const pages = packed.pages.map((page, index) => {
+      const stem = packed.pages.length > 1 ? `${name}_${index + 1}` : name;
       const image: AssetFile = {
         path: stem + EXTENSIONS[options.format],
-        data,
-        meta: { size: data.length, format: options.format, width: page.width, height: page.height, alpha: options.format !== 'jpeg', animated: false }
+        data: page.image,
+        meta: { size: 0, format: options.format, width: page.width, height: page.height, alpha: options.format !== 'jpeg', animated: false }
       };
       // the JSON borrows the image's hash, so both get the same name under a [hash] filename template
-      const json: AssetFile = { path: `${stem}.json`, data: Buffer.alloc(0), meta: { size: 0 }, tokens: { hash: contentHash(data) } };
-      outputs.push({ page, image, json });
+      const json: AssetFile = { path: `${stem}.json`, data: Buffer.alloc(0), meta: { size: 0 }, tokens: { hash: contentHash(page.image) } };
+      return { page, image, json };
+    });
+    const outputs: AssetFile[] = [];
+    for (const { page, image, json } of pages) {
+      const others = pages.filter((other) => other.json !== json).map((other) => outputPath(other.json, filename));
+      const meta: Record<string, unknown> = {
+        image: outputPath(image, filename),
+        format: 'RGBA8888',
+        size: { w: page.width, h: page.height },
+        scale: '1'
+      };
+      if (others.length) meta['related_multi_packs'] = others;
+      json.data = Buffer.from(JSON.stringify({ frames: page.frames, meta }));
+      outputs.push(image, json);
     }
-    for (const output of outputs) {
-      const others = outputs.filter((other) => other !== output).map((other) => context.filename(other.json));
-      const description = describePage(output.page, context.filename(output.image), options.extrude, others);
-      output.json.data = Buffer.from(JSON.stringify(description));
-      output.json.meta.size = output.json.data.length;
-    }
-    return outputs.flatMap(({ image, json }) => [image, json]);
+    return finishAction({ action: atlas.name, source, destination, inputs: files, outputs, warnings, errors, started });
   }
 };
 
@@ -109,8 +181,6 @@ interface Region {
 }
 
 interface Sprite {
-  file: AssetFile;
-  /** Frame name: the path without extension, e.g. `hero/idle_01`. */
   name: string;
   /** RGBA pixels of the kept region. */
   pixels: Buffer;
@@ -123,17 +193,16 @@ interface Sprite {
   offsetY: number;
 }
 
-async function decodeSprite(file: AssetFile, trim: boolean, context: ProcessContext): Promise<Sprite> {
-  const { data, info } = await sharp(file.data).rotate().ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+async function decodeSprite(sprite: AtlasSprite, trim: boolean, warnings: string[]): Promise<Sprite> {
+  const { data, info } = await sharp(sprite.data).rotate().ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let region: Region = { left: 0, top: 0, width: info.width, height: info.height };
   if (trim) {
     const visible = visibleRegion(data, info.width, info.height);
-    if (!visible) context.warn(`${file.path} is fully transparent; kept as a 1×1 frame`);
+    if (!visible) warnings.push(`${sprite.name} is fully transparent; kept as a 1×1 frame`);
     region = visible ?? { left: 0, top: 0, width: 1, height: 1 };
   }
   return {
-    file,
-    name: file.path.replace(/\.[^./]+$/, ''),
+    name: sprite.name,
     pixels: cropPixels(data, info.width, region),
     width: region.width,
     height: region.height,
@@ -197,7 +266,7 @@ const byName = (a: Sprite, b: Sprite) => (a.name < b.name ? -1 : a.name > b.name
 
 // MaxRects with best short side fit, no rotation. Sprites go in largest first, so the result only depends on
 // the input; a sprite that fits no open page opens a new one.
-function packPages(sprites: Sprite[], options: AtlasOptions, context: ProcessContext): Page[] {
+function packPages(sprites: Sprite[], options: AtlasOptions, errors: Array<{ sprite: string; message: string }>): Page[] {
   const { padding, extrude } = options;
   // with powerOfTwo the pages are rounded up afterwards, so they must be packed within the power of two below the limit
   const limitWidth = options.powerOfTwo ? 2 ** Math.floor(Math.log2(options.maxWidth)) : options.maxWidth;
@@ -209,10 +278,10 @@ function packPages(sprites: Sprite[], options: AtlasOptions, context: ProcessCon
     // a cell: the extruded edges around the pixels, then the gap to the next sprite
     const cell = { width: sprite.width + 2 * extrude + padding, height: sprite.height + 2 * extrude + padding };
     if (cell.width > limitWidth - padding || cell.height > limitHeight - padding) {
-      context.fail(
-        sprite.file,
-        `${sprite.width}×${sprite.height} px does not fit a ${options.maxWidth}×${options.maxHeight} page with this padding and extrude`
-      );
+      errors.push({
+        sprite: sprite.name,
+        message: `${sprite.width}×${sprite.height} px does not fit a ${options.maxWidth}×${options.maxHeight} page with this padding and extrude`
+      });
       continue;
     }
     if (pages.some((page) => placeIn(page, sprite, cell))) continue;
@@ -324,9 +393,9 @@ function encodePage(pixels: Buffer, page: Page, options: AtlasOptions): Promise<
   }
 }
 
-/** TexturePacker JSON hash: what PixiJS, Phaser and most other runtimes load. Frames sorted by name for stable output. */
-function describePage(page: Page, image: string, extrude: number, otherPages: string[]): Record<string, unknown> {
-  const frames: Record<string, unknown> = {};
+/** The frames of a page in TexturePacker JSON hash form, sorted by name for stable output. */
+function describeFrames(page: Page, extrude: number): Record<string, AtlasFrame> {
+  const frames: Record<string, AtlasFrame> = {};
   for (const { sprite, x, y } of [...page.placements].sort((a, b) => byName(a.sprite, b.sprite))) {
     frames[sprite.name] = {
       frame: { x: x + extrude, y: y + extrude, w: sprite.width, h: sprite.height },
@@ -336,7 +405,5 @@ function describePage(page: Page, image: string, extrude: number, otherPages: st
       sourceSize: { w: sprite.sourceWidth, h: sprite.sourceHeight }
     };
   }
-  const meta: Record<string, unknown> = { image, format: 'RGBA8888', size: { w: page.width, h: page.height }, scale: '1' };
-  if (otherPages.length) meta['related_multi_packs'] = otherPages;
-  return { frames, meta };
+  return frames;
 }

@@ -139,7 +139,7 @@ describe('image: when and failures', () => {
 
 describe('image()', () => {
   it('returns converted files in memory', async () => {
-    const result = await image({ source: 'tests/assets/images/ui/buttons', format: 'webp', quality: 70 });
+    const result = await image.process({ source: 'tests/assets/images/ui/buttons', format: 'webp', quality: 70 });
     assert.equal(result.ok, true, result.errors.join('\n'));
     assert.deepEqual(result.outputs.map((f) => f.path).sort(), ['pause.webp', 'play.webp']);
     assert.equal((await facts(result.outputs[0].data)).format, 'webp');
