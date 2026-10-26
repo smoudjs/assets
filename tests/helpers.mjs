@@ -7,7 +7,7 @@ import { cp, mkdir, mkdtemp, readdir, readFile, rm, rmdir, stat, writeFile } fro
 import path from 'node:path';
 import { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { actions, build, finishAction, outputPath, resolveOptions, selectFiles } from '../dist/index.js';
+import { actions, build, destinationPath, finishAction, resolveOptions, selectFiles } from '../dist/index.js';
 
 const TESTS = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,8 +38,8 @@ export async function tempDir() {
  */
 export async function run(config, options = {}) {
   const destination = config.destination ?? (await tempDir());
-  const exclude = ['generate.mjs', ...(Array.isArray(config.exclude) ? config.exclude : config.exclude ? [config.exclude] : [])];
-  const result = await build({ ...options, config: { source: ASSETS, ...config, destination, exclude } });
+  const ignore = ['generate.mjs', ...(Array.isArray(config.ignore) ? config.ignore : config.ignore ? [config.ignore] : [])];
+  const result = await build({ ...options, config: { source: ASSETS, ...config, destination, ignore } });
   return {
     result,
     destination,
@@ -80,11 +80,11 @@ export const bundle = actions.register({
   options: {},
   async process({ source, destination }) {
     const started = performance.now();
-    const { files, folder, warnings } = await selectFiles(source);
-    const name = folder || 'all';
+    const { files, folderName, warnings } = await selectFiles(source);
+    const name = folderName || 'all';
     const template = typeof destination === 'object' ? destination.filename : undefined;
     const list = { path: `${name}.txt`, data: Buffer.from(files.map((file) => file.path).join('\n')), meta: { size: 0 } };
-    const ref = { path: `${name}.ref`, data: Buffer.from(outputPath(list, template)), meta: { size: 0 } };
+    const ref = { path: `${name}.ref`, data: Buffer.from(destinationPath(list, template)), meta: { size: 0 } };
     return finishAction({ action: 'bundle', source, destination, inputs: files, outputs: [list, ref], warnings, errors: [], started });
   }
 });

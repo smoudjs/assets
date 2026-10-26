@@ -7,4 +7,5 @@ coverage
 /.vscode
 /docs
 /sandbox/compiled
+/sandbox/compiled-js
 /tests/.tmp

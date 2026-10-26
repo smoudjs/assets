@@ -28,7 +28,9 @@ export const xml: XmlAction = {
     const { comments } = resolveOptions<XmlOptions>(xml.options, options);
     // Keep CDATA untouched: swap each section for a placeholder, restore at the end.
     const cdata: string[] = [];
-    let text = data.toString('utf8').replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (section) => `\u0000${cdata.push(section) - 1}\u0000`);
+    let text = data
+      .toString('utf8')
+      .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (section) => `\u0000${cdata.push(section) - 1}\u0000`);
     if (!comments) text = text.replace(/<!--[\s\S]*?-->/g, '');
     text = text.replace(/>\s+</g, '><').trim();
     return Buffer.from(text.replace(/\u0000(\d+)\u0000/g, (_, index: string) => cdata[Number(index)] as string));
@@ -39,7 +41,11 @@ export const xml: XmlAction = {
     const options = resolveOptions<XmlOptions>(xml.options, input);
     const { files, warnings } = await selectFiles(source, { accepts: xml.accepts });
     const errors: string[] = [];
-    const outputs = await transformFiles(files, async (file) => ({ ...file, data: xml.minifyXml(file.data, options) }), errors);
+    const outputs = await transformFiles(
+      files,
+      async (file) => ({ ...file, data: xml.minifyXml(file.data, options) }),
+      errors
+    );
     return finishAction({ action: xml.name, source, destination, inputs: files, outputs, warnings, errors, started });
   }
 };

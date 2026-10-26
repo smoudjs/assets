@@ -5,7 +5,7 @@
 import sharp from 'sharp';
 import type { ActionDefinition, AssetFile, OptionTable } from '../types.js';
 import { finishAction, resolveOptions } from './index.js';
-import { normalizeDestination, outputPath, selectFiles } from '../files.js';
+import { destinationPath, normalizeDestination, selectFiles } from '../files.js';
 import { contentHash } from '../utils/fs.js';
 
 type PageFormat = 'png' | 'jpeg' | 'webp' | 'avif';
@@ -20,8 +20,11 @@ export interface AtlasOptions extends Record<string, unknown> {
   trim: boolean;
   powerOfTwo: boolean;
   format: PageFormat;
-  quality: number;
+  quality?: number;
 }
+
+/** Page quality when `quality` is not set, matching the image action's defaults. png pages stay lossless instead. */
+const QUALITY_WHEN_UNSET = { jpeg: 80, webp: 80, avif: 50 };
 
 export interface AtlasSprite {
   /** Frame name, e.g. `hero/idle_01`. */
@@ -85,7 +88,13 @@ const options: OptionTable = {
   },
   powerOfTwo: { kind: 'boolean', description: 'Round page sizes up to a power of two', default: false },
   format: { kind: 'enum', description: 'Page format', values: ['png', 'jpeg', 'webp', 'avif'], default: 'png' },
-  quality: { kind: 'number', description: 'Quality for jpeg, webp and avif pages', min: 1, max: 100, default: 85 }
+  quality: {
+    kind: 'number',
+    description:
+      'Page quality. For png pages, setting it switches from lossless to a palette; unset, jpeg and webp use 80 and avif 50',
+    min: 1,
+    max: 100
+  }
 };
 
 /** Packs sprites into texture atlas pages with a TexturePacker-style JSON per page. */
@@ -116,7 +125,9 @@ export const atlas: AtlasAction = {
 
     const pages = packPages(decoded, options, errors);
     if (pages.length > 1) {
-      warnings.push(`${decoded.length} sprites do not fit one ${options.maxWidth}×${options.maxHeight} page; ${pages.length} pages`);
+      warnings.push(
+        `${decoded.length} sprites do not fit one ${options.maxWidth}×${options.maxHeight} page; ${pages.length} pages`
+      );
     }
     const encoded: AtlasPage[] = [];
     for (const page of pages) {
@@ -133,7 +144,7 @@ export const atlas: AtlasAction = {
   async process({ source, destination, ...input }) {
     const started = performance.now();
     const options = resolveOptions<AtlasOptions>(atlas.options, input);
-    const { files, folder, warnings } = await selectFiles(source, { accepts: atlas.accepts });
+    const { files, folderName, warnings } = await selectFiles(source, { accepts: atlas.accepts });
     const spriteName = (file: AssetFile) => file.path.replace(/\.[^./]+$/, '');
     const packed = await atlas.packAtlas(
       files.map((file) => ({ name: spriteName(file), data: file.data })),
@@ -143,24 +154,36 @@ export const atlas: AtlasAction = {
     const errors = packed.errors.map(({ sprite, message }) => `${fileOf.get(sprite)?.origin ?? sprite}: ${message}`);
     warnings.push(...packed.warnings);
 
-    const name = options.name ?? (folder || 'atlas');
+    const name = options.name ?? (folderName || 'atlas');
     const { filename } = normalizeDestination(destination);
     const pages = packed.pages.map((page, index) => {
       const stem = packed.pages.length > 1 ? `${name}_${index + 1}` : name;
       const image: AssetFile = {
         path: stem + EXTENSIONS[options.format],
         data: page.image,
-        meta: { size: 0, format: options.format, width: page.width, height: page.height, alpha: options.format !== 'jpeg', animated: false }
+        meta: {
+          size: 0,
+          format: options.format,
+          width: page.width,
+          height: page.height,
+          alpha: options.format !== 'jpeg',
+          animated: false
+        }
       };
       // the JSON borrows the image's hash, so both get the same name under a [hash] filename template
-      const json: AssetFile = { path: `${stem}.json`, data: Buffer.alloc(0), meta: { size: 0 }, tokens: { hash: contentHash(page.image) } };
+      const json: AssetFile = {
+        path: `${stem}.json`,
+        data: Buffer.alloc(0),
+        meta: { size: 0 },
+        filenameTokens: { hash: contentHash(page.image) }
+      };
       return { page, image, json };
     });
     const outputs: AssetFile[] = [];
     for (const { page, image, json } of pages) {
-      const others = pages.filter((other) => other.json !== json).map((other) => outputPath(other.json, filename));
+      const others = pages.filter((other) => other.json !== json).map((other) => destinationPath(other.json, filename));
       const meta: Record<string, unknown> = {
-        image: outputPath(image, filename),
+        image: destinationPath(image, filename),
         format: 'RGBA8888',
         size: { w: page.width, h: page.height },
         scale: '1'
@@ -284,14 +307,14 @@ function packPages(sprites: Sprite[], options: AtlasOptions, errors: Array<{ spr
       });
       continue;
     }
-    if (pages.some((page) => placeIn(page, sprite, cell))) continue;
+    if (pages.some((page) => placeOnPage(page, sprite, cell))) continue;
     const page: Page = {
       placements: [],
       free: [{ x: padding, y: padding, width: limitWidth - padding, height: limitHeight - padding }],
       width: 0,
       height: 0
     };
-    placeIn(page, sprite, cell);
+    placeOnPage(page, sprite, cell);
     pages.push(page);
   }
 
@@ -305,7 +328,7 @@ function packPages(sprites: Sprite[], options: AtlasOptions, errors: Array<{ spr
 }
 
 /** Put the cell into the free rectangle where it leaves the smallest gap on its short side. False when none fits. */
-function placeIn(page: Page, sprite: Sprite, cell: { width: number; height: number }): boolean {
+function placeOnPage(page: Page, sprite: Sprite, cell: { width: number; height: number }): boolean {
   let best: Rect | undefined;
   let bestShort = Infinity;
   let bestLong = Infinity;
@@ -326,12 +349,12 @@ function placeIn(page: Page, sprite: Sprite, cell: { width: number; height: numb
   page.placements.push({ sprite, x: placed.x, y: placed.y });
   page.width = Math.max(page.width, placed.x + placed.width);
   page.height = Math.max(page.height, placed.y + placed.height);
-  page.free = splitFree(page.free, placed);
+  page.free = cutFreeRects(page.free, placed);
   return true;
 }
 
 /** Cut `placed` out of every free rectangle it overlaps, then drop rectangles contained in another. */
-function splitFree(free: Rect[], placed: Rect): Rect[] {
+function cutFreeRects(free: Rect[], placed: Rect): Rect[] {
   const next: Rect[] = [];
   for (const rect of free) {
     const apart =
@@ -346,12 +369,16 @@ function splitFree(free: Rect[], placed: Rect): Rect[] {
     const right = rect.x + rect.width;
     const bottom = rect.y + rect.height;
     if (placed.x > rect.x) next.push({ ...rect, width: placed.x - rect.x });
-    if (placed.x + placed.width < right) next.push({ ...rect, x: placed.x + placed.width, width: right - placed.x - placed.width });
+    if (placed.x + placed.width < right)
+      next.push({ ...rect, x: placed.x + placed.width, width: right - placed.x - placed.width });
     if (placed.y > rect.y) next.push({ ...rect, height: placed.y - rect.y });
-    if (placed.y + placed.height < bottom) next.push({ ...rect, y: placed.y + placed.height, height: bottom - placed.y - placed.height });
+    if (placed.y + placed.height < bottom)
+      next.push({ ...rect, y: placed.y + placed.height, height: bottom - placed.y - placed.height });
   }
   // of two identical rectangles the first survives
-  return next.filter((rect, i) => !next.some((other, j) => j !== i && contains(other, rect) && (j < i || !contains(rect, other))));
+  return next.filter(
+    (rect, i) => !next.some((other, j) => j !== i && contains(other, rect) && (j < i || !contains(rect, other)))
+  );
 }
 
 const contains = (outer: Rect, inner: Rect) =>
@@ -379,17 +406,24 @@ function composePage(page: Page, options: AtlasOptions): Buffer {
   return pixels;
 }
 
+// png pages stay lossless unless a quality is given; then they are quantized to a palette like the image action does
 function encodePage(pixels: Buffer, page: Page, options: AtlasOptions): Promise<Buffer> {
   const pipeline = sharp(pixels, { raw: { width: page.width, height: page.height, channels: 4 } });
+  const { quality } = options;
   switch (options.format) {
     case 'png':
-      return pipeline.png({ compressionLevel: 9 }).toBuffer();
+      return quality === undefined
+        ? pipeline.png({ compressionLevel: 9 }).toBuffer()
+        : pipeline.png({ compressionLevel: 9, palette: true, quality, colors: 256, dither: 1, effort: 7 }).toBuffer();
     case 'jpeg':
-      return pipeline.flatten({ background: '#000000' }).jpeg({ quality: options.quality, mozjpeg: true }).toBuffer();
+      return pipeline
+        .flatten({ background: '#000000' })
+        .jpeg({ quality: quality ?? QUALITY_WHEN_UNSET.jpeg, mozjpeg: true })
+        .toBuffer();
     case 'webp':
-      return pipeline.webp({ quality: options.quality }).toBuffer();
+      return pipeline.webp({ quality: quality ?? QUALITY_WHEN_UNSET.webp }).toBuffer();
     case 'avif':
-      return pipeline.avif({ quality: options.quality }).toBuffer();
+      return pipeline.avif({ quality: quality ?? QUALITY_WHEN_UNSET.avif }).toBuffer();
   }
 }
 

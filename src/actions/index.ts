@@ -2,7 +2,7 @@
 
 import { cpus } from 'node:os';
 import path from 'node:path';
-import { isFileList, normalizeDestination, outputPath, writeFiles } from '../files.js';
+import { destinationPath, isFileList, normalizeDestination, writeFiles } from '../files.js';
 import type {
   ActionDefinition,
   ActionResult,
@@ -186,7 +186,8 @@ export async function transformFiles(
   return outputs.filter((output): output is AssetFile => output !== null);
 }
 
-export interface ActionRun {
+/** What one `process` call did, which `finishAction` turns into its result. */
+export interface ActionOutcome {
   action: string;
   source: Source | AssetFile[];
   destination?: Destination;
@@ -204,24 +205,25 @@ export interface ActionRun {
  * Turns what a `process` did into its result. With a destination folder and no errors the outputs are written,
  * named by the filename template; with a `#virtual` destination they are renamed the same way but stay in memory.
  */
-export async function finishAction(run: ActionRun): Promise<ActionResult> {
-  const target = normalizeDestination(run.destination);
-  const virtual = target.folder?.startsWith('#') ? splitVirtual(target.folder) : undefined;
-  const warnings = [...run.warnings];
-  if (!run.inputs.length) warnings.push('selected no files');
+export async function finishAction(outcome: ActionOutcome): Promise<ActionResult> {
+  const { action, source, inputs, errors, started } = outcome;
+  const target = normalizeDestination(outcome.destination);
+  const virtual = target.folder?.startsWith('#') ? parseVirtualFolder(target.folder) : undefined;
+  const warnings = [...outcome.warnings];
+  if (!inputs.length) warnings.push('selected no files');
 
-  let outputs = run.outputs.map((output) => ({ ...output, meta: { ...output.meta, size: output.data.length } }));
+  let outputs = outcome.outputs.map((output) => ({ ...output, meta: { ...output.meta, size: output.data.length } }));
   let destination: string | null = null;
   if (virtual) {
-    outputs = outputs.map((output) => ({ ...output, path: join(virtual.sub, outputPath(output, target.filename)) }));
-  } else if (target.folder !== undefined && !run.errors.length) {
+    outputs = outputs.map((output) => ({ ...output, path: join(virtual.sub, destinationPath(output, target.filename)) }));
+  } else if (target.folder !== undefined && !errors.length) {
     const written = await writeFiles(outputs, target);
     outputs = outputs.map((output, index) => ({ ...output, path: written[index] as string }));
     destination = path.resolve(target.folder);
   }
 
-  const inputsByOrigin = new Map(run.inputs.map((file) => [file.origin ?? file.path, file]));
-  const bytesIn = run.inputs.reduce((total, file) => total + file.meta.size, 0);
+  const inputsByOrigin = new Map(inputs.map((file) => [file.origin ?? file.path, file]));
+  const bytesIn = inputs.reduce((total, file) => total + file.meta.size, 0);
   const rows = new Map<string, FileResult>();
   for (const output of outputs) {
     // group outputs, like atlas pages, have no origin: they share one row that stands for every input
@@ -230,7 +232,7 @@ export async function finishAction(run: ActionRun): Promise<ActionResult> {
     if (!row) {
       const input = output.origin === undefined ? undefined : inputsByOrigin.get(output.origin);
       row = {
-        source: output.origin ?? `${run.inputs.length} files`,
+        source: output.origin ?? `${inputs.length} files`,
         outputs: [],
         bytesIn: output.origin === undefined ? bytesIn : (input?.meta.size ?? 0),
         bytesOut: 0,
@@ -244,23 +246,27 @@ export async function finishAction(run: ActionRun): Promise<ActionResult> {
   }
 
   // files handed in directly are taken to be outputs of an earlier action, not source files
-  const origins = run.inputs.map((file) => file.origin ?? '');
-  const fromMemory = isFileList(run.source);
-  const virtualSources = new Set(origins.map((origin) => (origin.startsWith('#') ? splitVirtual(origin).name : fromMemory ? 'memory' : '')));
+  const origins = inputs.map((file) => file.origin ?? '');
+  const fromMemory = isFileList(source);
+  const memorySources = new Set(
+    origins.map((origin) => (origin.startsWith('#') ? parseVirtualFolder(origin).name : fromMemory ? 'memory' : ''))
+  );
   return {
-    ok: run.errors.length === 0,
-    action: run.action,
-    label: actionLabel(run.action, run.source),
-    selected: run.inputs.length,
-    ...(origins.length && virtualSources.size === 1 && !virtualSources.has('') ? { virtualSource: [...virtualSources][0] } : {}),
+    ok: errors.length === 0,
+    action,
+    label: actionLabel(action, source),
+    selected: inputs.length,
+    ...(origins.length && memorySources.size === 1 && !memorySources.has('')
+      ? { memorySource: [...memorySources][0] }
+      : {}),
     files: [...rows.values()],
     outputs,
     destination,
     bytesIn,
     bytesOut: outputs.reduce((total, output) => total + output.data.length, 0),
     warnings,
-    errors: run.errors,
-    duration: performance.now() - run.started
+    errors,
+    duration: performance.now() - started
   };
 }
 
@@ -273,7 +279,7 @@ export function actionLabel(action: string, source: Source | AssetFile[] | undef
 }
 
 /** `#tiles/half` → the virtual folder `tiles` and the sub-folder `half` inside it. */
-export function splitVirtual(folder: string): { name: string; sub: string } {
+export function parseVirtualFolder(folder: string): { name: string; sub: string } {
   const [name, ...sub] = folder.slice(1).split('/');
   return { name: name ?? '', sub: sub.join('/') };
 }

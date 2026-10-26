@@ -82,6 +82,16 @@ describe('atlas', () => {
     assert.equal(parse(await read('world.json')).meta.image, 'world.webp');
   });
 
+  it('png pages are lossless by default, and a quality turns on a palette', async () => {
+    const lossless = await run({ actions: [{ action: 'atlas', source: 'tiles' }] });
+    const palette = await run({ actions: [{ action: 'atlas', source: 'tiles', quality: 60 }] });
+    const plain = await lossless.read('tiles.png');
+    const quantized = await palette.read('tiles.png');
+    assert.equal((await sharp(plain).metadata()).isPalette, false, 'lossless page has no palette');
+    assert.equal((await sharp(quantized).metadata()).isPalette, true, 'quality gives a palette page');
+    assert.ok(quantized.length < plain.length, `${quantized.length} >= ${plain.length}`);
+  });
+
   it('a filename template with a hash names the page and its JSON alike', async () => {
     const { outputs, read } = await run({
       actions: [{ action: 'atlas', source: 'tiles', destination: { folder: 'atlases', filename: '[name].[hash:6][ext]' } }]

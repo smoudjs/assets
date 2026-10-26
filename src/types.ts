@@ -74,8 +74,8 @@ export interface AssetsConfig {
   source?: string;
   /** Base destination folder. Always a folder. Default `assets/compiled`. */
   destination?: string;
-  /** Never selected by anything. */
-  exclude?: SourcePattern | SourcePattern[];
+  /** Files the build never sees. No action can select them. */
+  ignore?: SourcePattern | SourcePattern[];
   defaults?: Defaults;
   /** Omitted: the built-in `default` preset's actions. */
   actions?: ActionEntry[];
@@ -87,12 +87,10 @@ export interface AssetsConfig {
 // Files in the pipeline
 // ---------------------------------------------------------------------------
 
-/** What a probe knows about a file: `{ width: 64, alpha: true }` for an image. */
-export type Facts = Record<string, number | boolean | string | undefined>;
-
-/** `size` is always known; the rest comes from a probe when a `when` needs it. */
-export interface AssetMeta extends Facts {
+/** Facts about a file. `size` is always known; the rest, like `{ width: 64, alpha: true }`, comes from a probe. */
+export interface AssetMeta {
   size: number;
+  [fact: string]: number | boolean | string | undefined;
 }
 
 /** Pure data. Actions receive and return these; only `selectFiles` and `writeFiles` touch disk. */
@@ -103,10 +101,10 @@ export interface AssetFile {
   meta: AssetMeta;
   /** Where it came from: relative to the root it was selected from, or `#name/path`. Set by `selectFiles`. */
   origin?: string;
-  /** Folder part of the pattern that selected it, put back when a destination mirrors the source tree. Set by `selectFiles`. */
-  base?: string;
-  /** Values for filename tokens. An action may set `hash` so that linked outputs, like an atlas page and its JSON, share one. */
-  tokens?: Record<string, string | number>;
+  /** Folder part of the pattern that selected it, like `ui` for `"ui/**"`. A build puts it back when no destination folder is given. Set by `selectFiles`. */
+  selectedFrom?: string;
+  /** Values for the filename template. An action may set `hash` so that linked outputs, like an atlas page and its JSON, share one. */
+  filenameTokens?: Record<string, string | number>;
   /** The original bytes were kept because the processed result would have been bigger. */
   keptOriginal?: boolean;
 }
@@ -138,7 +136,7 @@ export interface OptionDescriptor {
 export type OptionTable = Record<string, OptionDescriptor>;
 
 /** Reads facts out of a file's bytes so a `when` can filter on them. */
-export type Probe = (data: Buffer) => Promise<Facts>;
+export type Probe = (data: Buffer) => Promise<Partial<AssetMeta>>;
 
 /** What every `process` takes, next to the action's own options: `process({ source, destination, quality: 80 })`. */
 export interface ProcessParams {
@@ -188,8 +186,8 @@ export interface ActionResult {
   label: string;
   /** How many source files the action received. */
   selected: number;
-  /** The virtual folder the files came from, or `memory` for files handed in directly. Those bytes are not source bytes. */
-  virtualSource?: string;
+  /** Set when the files came from memory: the virtual folder's name, or `memory` for files handed in directly. Those bytes are not source bytes. */
+  memorySource?: string;
   /** One per source file, or one for all of them when the action packs its files into group outputs (atlas). */
   files: FileResult[];
   /** The produced files, in memory. */

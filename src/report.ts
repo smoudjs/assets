@@ -21,18 +21,22 @@ export function formatReport(input: ActionResult | ActionResult[] | BuildResult,
   const build = 'actions' in input ? input : undefined;
   const results: ActionResult[] = 'actions' in input ? input.actions : toArray(input);
   const lines: string[] = [];
-  lines.push(
-    bold(`smoud-assets v${__VERSION__}`) + (build?.dryRun ? yellow('  dry run, nothing written') : '')
-  );
+  lines.push(bold(`smoud-assets v${__VERSION__}`) + (build?.dryRun ? yellow('  dry run, nothing written') : ''));
   lines.push('');
 
   const labelWidth = Math.max(12, ...results.map((result) => result.label.length));
   for (const [index, result] of results.entries()) {
-    const columns = [gray(`#${index + 1}`.padStart(3)), result.label.padEnd(labelWidth), plural(result.selected, 'file').padStart(9)];
+    const columns = [
+      gray(`#${index + 1}`.padStart(3)),
+      result.label.padEnd(labelWidth),
+      plural(result.selected, 'file').padStart(9)
+    ];
     if (result.selected) {
       // outputs that never reach disk are a step in a chain: their change is shown dim, not as a warning colour
       const inMemory = result.destination === null;
-      const change = inMemory ? dim(formatChange(result.bytesIn, result.bytesOut)) : coloredChange(result.bytesIn, result.bytesOut);
+      const change = inMemory
+        ? dim(formatChange(result.bytesIn, result.bytesOut))
+        : coloredChange(result.bytesIn, result.bytesOut);
       columns.push(`${formatBytes(result.bytesIn)} → ${formatBytes(result.bytesOut)}`, change);
       if (inMemory) columns.push(dim(`→ ${memoryTarget(result)}`));
     }
@@ -54,7 +58,7 @@ export function formatReport(input: ActionResult | ActionResult[] | BuildResult,
   let bytesOut = 0;
   let keptOriginals = 0;
   for (const result of results) {
-    if (result.virtualSource === undefined) {
+    if (result.memorySource === undefined) {
       files += result.selected;
       bytesIn += result.bytesIn;
     }
@@ -86,7 +90,13 @@ export function formatReport(input: ActionResult | ActionResult[] | BuildResult,
     lines.push(red(`Failed with ${plural(errors.length, 'error')}. Nothing was written${untouched}.`));
   } else {
     const duration = build ? build.duration : results.reduce((total, result) => total + result.duration, 0);
-    const destination = build ? (build.dryRun ? null : build.destination) : results.length === 1 ? (results[0] as ActionResult).destination : null;
+    const destination = build
+      ? build.dryRun
+        ? null
+        : build.destination
+      : results.length === 1
+        ? (results[0] as ActionResult).destination
+        : null;
     const note = destination ? dim(`  → ${path.relative(process.cwd(), destination) || '.'}`) : '';
     lines.push(green(`Done in ${formatDuration(duration)}`) + note);
   }
@@ -96,7 +106,9 @@ export function formatReport(input: ActionResult | ActionResult[] | BuildResult,
 /** Where in-memory outputs went: the virtual folders of a build, `#icons`, or `memory` for a direct call. */
 function memoryTarget(result: ActionResult): string {
   const outputs = result.files.flatMap((row) => row.outputs);
-  const folders = [...new Set(outputs.filter((output) => output.startsWith('#')).map((output) => output.split('/')[0] as string))];
+  const folders = [
+    ...new Set(outputs.filter((output) => output.startsWith('#')).map((output) => output.split('/')[0] as string))
+  ];
   return folders.length ? folders.join(', ') : 'memory';
 }
 

@@ -12,6 +12,15 @@ export const copy: ActionDefinition = {
     const started = performance.now();
     resolveOptions(copy.options, options);
     const { files, warnings } = await selectFiles(source);
-    return finishAction({ action: copy.name, source, destination, inputs: files, outputs: files, warnings, errors: [], started });
+    return finishAction({
+      action: copy.name,
+      source,
+      destination,
+      inputs: files,
+      outputs: files,
+      warnings,
+      errors: [],
+      started
+    });
   }
 };

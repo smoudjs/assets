@@ -1,7 +1,7 @@
 // One Sharp pipeline per file, always in this order: trim → resize → flatten → encode.
 
 import sharp, { type Metadata, type OutputInfo, type Sharp } from 'sharp';
-import type { ActionDefinition, Facts, OptionTable } from '../types.js';
+import type { ActionDefinition, AssetMeta, OptionTable } from '../types.js';
 import { finishAction, resolveOptions, transformFiles } from './index.js';
 import { selectFiles } from '../files.js';
 import { extension } from '../utils/fs.js';
@@ -9,7 +9,7 @@ import { extension } from '../utils/fs.js';
 type Format = 'png' | 'jpeg' | 'webp' | 'avif' | 'gif';
 const FORMATS: Format[] = ['png', 'jpeg', 'webp', 'avif', 'gif'];
 const EXTENSIONS: Record<Format, string> = { png: '.png', jpeg: '.jpg', webp: '.webp', avif: '.avif', gif: '.gif' };
-const ANIMATED: Format[] = ['gif', 'webp'];
+const ANIMATED_FORMATS: Format[] = ['gif', 'webp'];
 
 export interface ResizeOptions {
   width?: number;
@@ -18,7 +18,23 @@ export interface ResizeOptions {
   fit?: 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
   upscale?: boolean;
   kernel?: 'nearest' | 'cubic' | 'mitchell' | 'lanczos2' | 'lanczos3';
+  position?: (typeof POSITIONS)[number];
 }
+
+/** Which part of the image `cover` and `contain` keep: a side or corner, or a strategy that looks at the content. */
+const POSITIONS = [
+  'center',
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'right top',
+  'right bottom',
+  'left bottom',
+  'left top',
+  'entropy',
+  'attention'
+] as const;
 
 export interface ImageOptions extends Record<string, unknown> {
   resize?: ResizeOptions;
@@ -32,10 +48,17 @@ export interface ImageOptions extends Record<string, unknown> {
   animated: boolean;
   density: number;
   png: { palette: boolean; colors: number; dither: number; effort: number };
-  jpeg: { progressive: boolean; mozjpeg: boolean; chromaSubsampling: '4:2:0' | '4:4:4' };
-  webp: { alphaQuality: number; nearLossless: boolean; smartSubsample: boolean; effort: number };
-  avif: { chromaSubsampling: '4:2:0' | '4:4:4'; effort: number };
-  gif: { colors: number; dither: number; effort: number };
+  jpeg: { quality?: number; progressive: boolean; mozjpeg: boolean; chromaSubsampling: '4:2:0' | '4:4:4' };
+  webp: {
+    quality?: number;
+    preset: 'default' | 'photo' | 'picture' | 'drawing' | 'icon' | 'text';
+    alphaQuality: number;
+    nearLossless: boolean;
+    smartSubsample: boolean;
+    effort: number;
+  };
+  avif: { quality: number; chromaSubsampling: '4:2:0' | '4:4:4'; effort: number };
+  gif: { colors: number; dither: number; effort: number; interFrameMaxError: number };
 }
 
 /** What `optimizeImage` returns: the encoded bytes and what they are. */
@@ -53,7 +76,7 @@ export interface OptimizedImage {
 
 export interface ImageAction extends ActionDefinition<ImageOptions> {
   /** Format, width, height, alpha and animated of an image, read from its header. Also the probe for `when`. */
-  readImageMeta(data: Buffer): Promise<Facts>;
+  readImageMeta(data: Buffer): Promise<Partial<AssetMeta>>;
   /**
    * Trim, resize, flatten and encode one image. Returns null when the source format cannot be kept (svg and
    * other vector sources) and no raster `format` was asked for.
@@ -81,6 +104,12 @@ const options: OptionTable = {
         kind: 'enum',
         description: 'Resampling kernel',
         values: ['nearest', 'cubic', 'mitchell', 'lanczos2', 'lanczos3']
+      },
+      position: {
+        kind: 'enum',
+        description: 'Part of the image cover and contain keep: a side, a corner, "entropy" or "attention"',
+        values: POSITIONS,
+        default: 'center'
       }
     }
   },
@@ -104,10 +133,10 @@ const options: OptionTable = {
   },
   quality: {
     kind: 'number',
-    description: 'Quality for lossy encoders and png palette quantization',
+    description: "Quality for png palettes, jpeg and webp; a format's own quality wins. avif uses its own",
     min: 1,
     max: 100,
-    default: 85
+    default: 80
   },
   lossless: { kind: 'boolean', description: 'Lossless encoding where the format supports it', default: false },
   keepSmaller: { kind: 'boolean', description: 'Emit the original when a pure re-encode would grow it', default: true },
@@ -128,6 +157,7 @@ const options: OptionTable = {
     kind: 'object',
     description: 'JPEG encoder',
     properties: {
+      quality: { kind: 'number', description: 'JPEG quality, wins over the top-level quality', min: 1, max: 100 },
       progressive: { kind: 'boolean', description: 'Progressive scan', default: false },
       mozjpeg: { kind: 'boolean', description: 'mozjpeg optimizations', default: true },
       chromaSubsampling: { kind: 'enum', description: 'Chroma subsampling', values: ['4:2:0', '4:4:4'], default: '4:2:0' }
@@ -137,16 +167,30 @@ const options: OptionTable = {
     kind: 'object',
     description: 'WebP encoder',
     properties: {
+      quality: { kind: 'number', description: 'WebP quality, wins over the top-level quality', min: 1, max: 100 },
+      preset: {
+        kind: 'enum',
+        description: 'Tune the encoder for the content',
+        values: ['default', 'photo', 'picture', 'drawing', 'icon', 'text'],
+        default: 'default'
+      },
       alphaQuality: { kind: 'number', description: 'Alpha channel quality', min: 0, max: 100, default: 100 },
       nearLossless: { kind: 'boolean', description: 'Near-lossless mode', default: false },
       smartSubsample: { kind: 'boolean', description: 'High-quality chroma subsampling', default: false },
-      effort: { kind: 'number', description: 'CPU effort 0-6', min: 0, max: 6, default: 4 }
+      effort: { kind: 'number', description: 'CPU effort 0-6', min: 0, max: 6, default: 6 }
     }
   },
   avif: {
     kind: 'object',
     description: 'AVIF encoder',
     properties: {
+      quality: {
+        kind: 'number',
+        description: 'AVIF quality; the top-level quality does not apply to avif',
+        min: 1,
+        max: 100,
+        default: 50
+      },
       chromaSubsampling: { kind: 'enum', description: 'Chroma subsampling', values: ['4:2:0', '4:4:4'], default: '4:4:4' },
       effort: { kind: 'number', description: 'CPU effort 0-9', min: 0, max: 9, default: 4 }
     }
@@ -157,7 +201,14 @@ const options: OptionTable = {
     properties: {
       colors: { kind: 'number', description: 'Palette size', min: 2, max: 256, default: 256 },
       dither: { kind: 'number', description: 'Dithering level', min: 0, max: 1, default: 1 },
-      effort: { kind: 'number', description: 'CPU effort 1-10', min: 1, max: 10, default: 7 }
+      effort: { kind: 'number', description: 'CPU effort 1-10', min: 1, max: 10, default: 7 },
+      interFrameMaxError: {
+        kind: 'number',
+        description: 'Colour error allowed to reuse pixels of the previous frame; higher makes animations smaller',
+        min: 0,
+        max: 32,
+        default: 0
+      }
     }
   }
 };
@@ -169,7 +220,7 @@ export const image: ImageAction = {
   options,
 
   async readImageMeta(data) {
-    return facts(await sharp(data).metadata());
+    return toAssetMeta(await sharp(data).metadata());
   },
 
   probe(data) {
@@ -190,18 +241,19 @@ export const image: ImageAction = {
     } else {
       candidates = Array.isArray(options.format) ? options.format : [options.format];
     }
-    if (meta.hasAlpha && !options.flatten && candidates.length > 1) candidates = candidates.filter((format) => format !== 'jpeg');
+    if (meta.hasAlpha && !options.flatten && candidates.length > 1)
+      candidates = candidates.filter((format) => format !== 'jpeg');
     if (meta.hasAlpha && !options.flatten && candidates.length === 1 && candidates[0] === 'jpeg') {
       warnings.push('jpeg cannot hold alpha; flattened onto black (set "flatten" to choose the colour)');
     }
 
     // Pure re-encode: same format, no pixel change. Only then can the original stand in for the result.
     const pureReencode =
-      !resizes(options) && !options.trim && !options.flatten && source !== null && !(animated && !options.animated);
+      !hasResize(options) && !options.trim && !options.flatten && source !== null && !(animated && !options.animated);
 
-    let best: Candidate | undefined;
+    let best: EncodedCandidate | undefined;
     for (const format of candidates) {
-      const keepFrames = animated && ANIMATED.includes(format);
+      const keepFrames = animated && ANIMATED_FORMATS.includes(format);
       let pipeline = sharp(data, { animated: keepFrames, density: options.density }).rotate();
       pipeline = applyTrim(pipeline, options);
       pipeline = applyResize(pipeline, options, meta);
@@ -210,7 +262,7 @@ export const image: ImageAction = {
       pipeline = encode(pipeline, format, options);
 
       const encoded = await pipeline.toBuffer({ resolveWithObject: true });
-      let candidate: Candidate = { format, data: encoded.data, info: encoded.info, kept: false };
+      let candidate: EncodedCandidate = { format, data: encoded.data, info: encoded.info, kept: false };
       if (options.keepSmaller && pureReencode && format === source && data.length <= encoded.data.length) {
         candidate = { format, data, info: { ...encoded.info, size: data.length }, kept: true };
       }
@@ -246,7 +298,8 @@ export const image: ImageAction = {
         }
         for (const warning of result.warnings) warnings.push(`${name}: ${warning}`);
         const { data, format, width, height, alpha, animated, keptOriginal } = result;
-        const path = format === formatOfExtension(file.path) ? file.path : file.path.replace(/\.[^./]+$/, '') + EXTENSIONS[format];
+        const path =
+          format === formatOfExtension(file.path) ? file.path : file.path.replace(/\.[^./]+$/, '') + EXTENSIONS[format];
         return { ...file, path, data, meta: { ...file.meta, format, width, height, alpha, animated }, keptOriginal };
       },
       errors
@@ -255,7 +308,8 @@ export const image: ImageAction = {
   }
 };
 
-interface Candidate {
+/** One format tried for an image: the encoded bytes, or the original when it was smaller. */
+interface EncodedCandidate {
   format: Format;
   data: Buffer;
   info: OutputInfo;
@@ -270,15 +324,15 @@ function applyTrim(pipeline: Sharp, options: ImageOptions): Sharp {
 }
 
 // `resize` is filled with its defaults even when never mentioned, so "no resize" means no dimension given.
-function resizes(options: ImageOptions): boolean {
+function hasResize(options: ImageOptions): boolean {
   const resize = options.resize;
   return resize !== undefined && (resize.width ?? resize.height ?? resize.scale) !== undefined;
 }
 
 function applyResize(pipeline: Sharp, options: ImageOptions, meta: Metadata): Sharp {
-  if (!resizes(options)) return pipeline;
+  if (!hasResize(options)) return pipeline;
   const resize = options.resize as ResizeOptions;
-  const common = { withoutEnlargement: !resize.upscale, kernel: resize.kernel };
+  const common = { withoutEnlargement: !resize.upscale, kernel: resize.kernel, position: resize.position };
 
   if (resize.scale !== undefined && meta.width && meta.height) {
     const height = meta.pageHeight ?? meta.height;
@@ -311,14 +365,15 @@ function encode(pipeline: Sharp, format: Format, options: ImageOptions): Sharp {
       });
     case 'jpeg':
       return pipeline.jpeg({
-        quality: options.quality,
+        quality: options.jpeg.quality ?? options.quality,
         progressive: options.jpeg.progressive,
         mozjpeg: options.jpeg.mozjpeg,
         chromaSubsampling: options.jpeg.chromaSubsampling
       });
     case 'webp':
       return pipeline.webp({
-        quality: options.quality,
+        quality: options.webp.quality ?? options.quality,
+        preset: options.webp.preset,
         lossless: options.lossless,
         alphaQuality: options.webp.alphaQuality,
         nearLossless: options.webp.nearLossless,
@@ -327,13 +382,18 @@ function encode(pipeline: Sharp, format: Format, options: ImageOptions): Sharp {
       });
     case 'avif':
       return pipeline.avif({
-        quality: options.quality,
+        quality: options.avif.quality ?? options.quality,
         lossless: options.lossless,
         chromaSubsampling: options.avif.chromaSubsampling,
         effort: options.avif.effort
       });
     case 'gif':
-      return pipeline.gif({ colors: options.gif.colors, dither: options.gif.dither, effort: options.gif.effort });
+      return pipeline.gif({
+        colors: options.gif.colors,
+        dither: options.gif.dither,
+        effort: options.gif.effort,
+        interFrameMaxError: options.gif.interFrameMaxError
+      });
   }
 }
 
@@ -347,7 +407,7 @@ function formatOfExtension(filePath: string): Format | null {
   return normalizeFormat(extension(filePath));
 }
 
-function facts(meta: Metadata): Facts {
+function toAssetMeta(meta: Metadata): Partial<AssetMeta> {
   return {
     format: normalizeFormat(meta.format) ?? meta.format,
     width: meta.width,

@@ -1,7 +1,7 @@
 /** Word similarity for "did you mean" hints. */
 
 /** Edit (Levenshtein) distance between two strings. */
-export function editDistance(a: string, b: string): number {
+function editDistance(a: string, b: string): number {
   if (a === b) return 0;
   let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {

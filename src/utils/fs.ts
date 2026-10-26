@@ -33,7 +33,7 @@ export async function writeFile(file: string, data: Buffer): Promise<void> {
 }
 
 /** Move a file into place over whatever is there. Falls back to copy + delete when a rename is refused. */
-export async function renameOver(from: string, to: string): Promise<void> {
+export async function moveFile(from: string, to: string): Promise<void> {
   await fs.mkdir(path.dirname(to), { recursive: true });
   try {
     await fs.rename(from, to);
@@ -45,7 +45,8 @@ export async function renameOver(from: string, to: string): Promise<void> {
   }
 }
 
-export async function remove(target: string): Promise<void> {
+/** Delete a file or a folder with everything in it. Nothing there is fine. */
+export async function removePath(target: string): Promise<void> {
   await fs.rm(target, { recursive: true, force: true, maxRetries: 3 });
 }
 
@@ -91,9 +92,9 @@ export function toPosix(filePath: string): string {
   return filePath.replace(/\\/g, '/');
 }
 
-/** `stripBase('images/bg/sky.png', 'images')` → `bg/sky.png`. An empty base returns the path unchanged. */
-export function stripBase(filePath: string, base: string): string {
-  return base && filePath.startsWith(`${base}/`) ? filePath.slice(base.length + 1) : filePath;
+/** `stripFolder('images/bg/sky.png', 'images')` → `bg/sky.png`. An empty folder returns the path unchanged. */
+export function stripFolder(filePath: string, folder: string): string {
+  return folder && filePath.startsWith(`${folder}/`) ? filePath.slice(folder.length + 1) : filePath;
 }
 
 /** Join path parts, skipping empty ones. */
@@ -113,11 +114,11 @@ export function basename(filePath: string): string {
 
 /** Lower-case extension without the dot: `sky.PNG` → `png`. */
 export function extension(filePath: string): string {
-  return splitName(basename(filePath)).ext.slice(1).toLowerCase();
+  return splitExtension(basename(filePath)).ext.slice(1).toLowerCase();
 }
 
 /** `sky.png` → `{ name: 'sky', ext: '.png' }`; `README` → `{ name: 'README', ext: '' }`. */
-export function splitName(fileName: string): { name: string; ext: string } {
+export function splitExtension(fileName: string): { name: string; ext: string } {
   const dot = fileName.lastIndexOf('.');
   return dot > 0 ? { name: fileName.slice(0, dot), ext: fileName.slice(dot) } : { name: fileName, ext: '' };
 }
@@ -138,7 +139,7 @@ export function renderFilename(
   data: Buffer,
   tokens: Record<string, string | number> = {}
 ): string {
-  const { name, ext } = splitName(fileName);
+  const { name, ext } = splitExtension(fileName);
   let usedExt = false;
   const rendered = template.replace(/\[([a-zA-Z]+)(?::(\d+))?\]/g, (whole, token: string, length?: string) => {
     if (token === 'name') return name;
@@ -151,6 +152,6 @@ export function renderFilename(
     const value = tokens[token];
     return value === undefined ? whole : String(value);
   });
-  if (usedExt || splitName(rendered).ext) return rendered;
+  if (usedExt || splitExtension(rendered).ext) return rendered;
   return rendered + ext;
 }

@@ -4,8 +4,28 @@
 import { promises as fs, type Dirent, type Stats } from 'node:fs';
 import path from 'node:path';
 import picomatch from 'picomatch';
-import type { AssetFile, AssetMeta, Destination, DestinationSpec, Probe, Source, SourcePattern, SourceSpec, WhenSpec } from './types.js';
-import { basename, dirname, extension, isPathUnderFolder, join, renderFilename, stripBase, toPosix, writeFile } from './utils/fs.js';
+import type {
+  AssetFile,
+  AssetMeta,
+  Destination,
+  DestinationSpec,
+  Probe,
+  Source,
+  SourcePattern,
+  SourceSpec,
+  WhenSpec
+} from './types.js';
+import {
+  basename,
+  dirname,
+  extension,
+  isPathUnderFolder,
+  join,
+  renderFilename,
+  stripFolder,
+  toPosix,
+  writeFile
+} from './utils/fs.js';
 import { toArray } from './utils/object.js';
 
 export interface SelectOptions {
@@ -25,8 +45,8 @@ export interface SelectOptions {
 
 export interface Selection {
   files: AssetFile[];
-  /** Name of the one folder every file came from, `''` when they come from several. Group outputs are named after it. */
-  folder: string;
+  /** Name of the one folder every file came from, like `icons`; `''` when they come from several. Group outputs are named after it. */
+  folderName: string;
   warnings: string[];
 }
 
@@ -45,16 +65,16 @@ export async function selectFiles(source: Source | AssetFile[], options: SelectO
   const accepts = options.accepts ?? '*';
 
   const pool = fromMemory ? source : options.pool;
-  const candidates = pool ? pool.map(candidateFromMemory) : await walkPatterns(root, includes, excluded);
+  const candidates = pool ? pool.map(candidateFromMemory) : await walkPatternFolders(root, includes, excluded);
 
   const files: AssetFile[] = [];
   for (const candidate of candidates) {
     // files passed in memory keep the folder they were selected from, unless a pattern selects them again
-    let base = candidate.file?.base ?? '';
+    let selectedFrom = candidate.file?.selectedFrom ?? '';
     if (includes.length) {
       const hit = includes.find((include) => include.test(candidate.path));
       if (!hit) continue;
-      base = hit.base(candidate.path);
+      selectedFrom = hit.selectedFrom(candidate.path);
     }
     if (excluded(candidate.path)) continue;
     if (options.skip?.(candidate.origin)) continue;
@@ -63,20 +83,20 @@ export async function selectFiles(source: Source | AssetFile[], options: SelectO
     const data = candidate.file?.data ?? (await fs.readFile(candidate.absolute as string));
     const file: AssetFile = {
       ...candidate.file,
-      path: stripBase(candidate.path, base),
+      path: stripFolder(candidate.path, selectedFrom),
       data,
       meta: candidate.file?.meta ?? { size: data.length },
       origin: candidate.origin,
-      // a base outside the root would let an output placed by its source folder escape the destination
-      base: base.startsWith('..') ? '' : base
+      // a folder outside the root would let an output placed by its source folder escape the destination
+      selectedFrom: selectedFrom.startsWith('..') ? '' : selectedFrom
     };
     if (when) {
-      await probeFacts(file, when.needs, options.probe, warnings);
+      await fillFacts(file, when.needs, options.probe, warnings);
       if (!when.test(file.meta)) continue;
     }
     files.push(file);
   }
-  return { files, folder: commonFolder(files), warnings };
+  return { files, folderName: commonFolderName(files), warnings };
 }
 
 /** Writes every file under the destination folder, the filename template applied. Returns the paths relative to it. */
@@ -85,7 +105,7 @@ export async function writeFiles(files: AssetFile[], destination: Destination): 
   if (folder === undefined || folder.startsWith('#')) throw new Error('writeFiles needs a destination folder on disk');
   const written: string[] = [];
   for (const file of files) {
-    const relative = outputPath(file, filename);
+    const relative = destinationPath(file, filename);
     await writeFile(path.resolve(folder, relative), file.data);
     written.push(relative);
   }
@@ -93,8 +113,8 @@ export async function writeFiles(files: AssetFile[], destination: Destination): 
 }
 
 /** Where a file lands relative to its destination folder: its own folder part, then the filename template applied. */
-export function outputPath(file: AssetFile, template: string = DEFAULT_FILENAME): string {
-  return join(dirname(file.path), renderFilename(template, basename(file.path), file.data, file.tokens));
+export function destinationPath(file: AssetFile, filename: string = DEFAULT_FILENAME): string {
+  return join(dirname(file.path), renderFilename(filename, basename(file.path), file.data, file.filenameTokens));
 }
 
 /** `"ui"` → `{ folder: "ui" }`; folders are cleaned to posix without `./` or a trailing slash. */
@@ -123,11 +143,11 @@ export function normalizeSource(source: Source): NormalizedSource {
   return { include, exclude, when: spec.when };
 }
 
-/** Every file under `root` that `exclude` does not drop, as root-relative posix paths, without reading any. */
-export async function listSourceFiles(root: string, exclude: SourcePattern | SourcePattern[] = []): Promise<string[]> {
+/** Every file under `root` that `ignore` does not drop, as root-relative posix paths, without reading any. */
+export async function listSourceFiles(root: string, ignore: SourcePattern | SourcePattern[] = []): Promise<string[]> {
   const absolute = path.resolve(root);
-  const excluded = matchesAny(toArray(exclude).map(cleanPattern), absolute);
-  return (await walkPatterns(absolute, [], excluded)).map((candidate) => candidate.origin);
+  const ignored = matchesAny(toArray(ignore).map(cleanPattern), absolute);
+  return (await walkPatternFolders(absolute, [], ignored)).map((candidate) => candidate.origin);
 }
 
 /** Files already in memory, as opposed to patterns. An empty list counts as files. */
@@ -135,14 +155,29 @@ export function isFileList(source: Source | AssetFile[]): source is AssetFile[] 
   return Array.isArray(source) && source.every((item) => typeof item === 'object');
 }
 
+/** The one `selectedFrom` folder every file shares, as a path; `''` when they come from several. */
+export function commonSelectedFrom(files: AssetFile[]): string {
+  const folders = new Set(files.map((file) => file.selectedFrom ?? ''));
+  return folders.size === 1 ? ([...folders][0] as string) : '';
+}
+
 function cleanPattern(pattern: unknown): string {
-  if (typeof pattern !== 'string' || !pattern.trim()) throw new Error(`patterns must be non-empty strings, got ${JSON.stringify(pattern)}`);
+  if (typeof pattern !== 'string' || !pattern.trim())
+    throw new Error(`patterns must be non-empty strings, got ${JSON.stringify(pattern)}`);
   return toPosix(pattern).replace(/^\.\//, '');
 }
 
 function cleanFolderPath(folder: string): string {
   const clean = folder.replace(/^(\.\/)+/, '').replace(/\/+$/, '');
   return clean === '.' ? '' : clean;
+}
+
+/** The name of the folder the files have in common: the pattern's folder, or the virtual folder they were read from. */
+function commonFolderName(files: AssetFile[]): string {
+  const folder = commonSelectedFrom(files);
+  if (folder) return basename(folder);
+  const virtual = new Set(files.map((file) => (file.origin?.startsWith('#') ? file.origin.slice(1).split('/')[0] : '')));
+  return virtual.size === 1 ? ([...virtual][0] as string) : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -152,12 +187,12 @@ function cleanFolderPath(folder: string): string {
 interface CompiledPattern {
   test(relative: string): boolean;
   /** Folder part of the pattern, for the file it matched. */
-  base(relative: string): string;
+  selectedFrom(relative: string): string;
   /** Where to start walking the disk: a folder, or a single file. Relative to the root. */
   walkFrom: string;
 }
 
-// Like gitignore: a pattern without a slash matches by file name at any depth (`*.json`).
+// A pattern without a slash matches by file name at any depth (`*.json`).
 // picomatch's matchBase would do that for every pattern, so it is only switched on for slash-less ones.
 const matchOptionsFor = (pattern: string) => (pattern.includes('/') ? MATCH_OPTIONS : { ...MATCH_OPTIONS, matchBase: true });
 
@@ -167,15 +202,15 @@ function compilePattern(input: string, root: string): CompiledPattern {
   const scanned = picomatch.scan(pattern);
   if (scanned.isGlob) {
     const matcher = picomatch(pattern, matchOptionsFor(pattern));
-    const base = cleanFolderPath(scanned.base);
-    return { test: matcher, base: () => base, walkFrom: base };
+    const folder = cleanFolderPath(scanned.base);
+    return { test: matcher, selectedFrom: () => folder, walkFrom: folder };
   }
   // a plain path is a folder, unless it names exactly one file
   const clean = cleanFolderPath(pattern);
   const under = picomatch(`${clean}/**`, MATCH_OPTIONS);
   return {
     test: (relative) => relative === clean || under(relative),
-    base: (relative) => (relative === clean ? cleanFolderPath(path.posix.dirname(clean)) : clean),
+    selectedFrom: (relative) => (relative === clean ? cleanFolderPath(path.posix.dirname(clean)) : clean),
     walkFrom: clean
   };
 }
@@ -203,7 +238,11 @@ function candidateFromMemory(file: AssetFile): Candidate {
 }
 
 /** Every file under the folder part of each pattern, as root-relative posix paths. No patterns: everything under the root. */
-async function walkPatterns(root: string, includes: CompiledPattern[], excluded: (relative: string) => boolean): Promise<Candidate[]> {
+async function walkPatternFolders(
+  root: string,
+  includes: CompiledPattern[],
+  excluded: (relative: string) => boolean
+): Promise<Candidate[]> {
   const starts = includes.length ? includes.map((include) => path.resolve(root, include.walkFrom)) : [root];
   const unique = [...new Set(starts)].sort();
   const candidates: Candidate[] = [];
@@ -213,13 +252,18 @@ async function walkPatterns(root: string, includes: CompiledPattern[], excluded:
     if (!kind) continue;
     const origin = toPosix(path.relative(root, start));
     if (kind.isFile()) candidates.push({ path: origin, origin, absolute: start });
-    else if (kind.isDirectory()) await walk(start, origin, candidates, excluded);
+    else if (kind.isDirectory()) await walkFolder(start, origin, candidates, excluded);
   }
   return candidates;
 }
 
 /** Skips dot entries, node_modules, excluded folders and symlinks that lead outside the folder being walked. */
-async function walk(folder: string, origin: string, candidates: Candidate[], excluded: (relative: string) => boolean): Promise<void> {
+async function walkFolder(
+  folder: string,
+  origin: string,
+  candidates: Candidate[],
+  excluded: (relative: string) => boolean
+): Promise<void> {
   const real = await fs.realpath(folder);
   async function visit(dir: string, relative: string): Promise<void> {
     const entries = (await fs.readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
@@ -253,16 +297,6 @@ async function statOrNull(target: string): Promise<Stats | null> {
   } catch {
     return null;
   }
-}
-
-/** The folder the files have in common: the pattern's folder, or the virtual folder they were read from. */
-function commonFolder(files: AssetFile[]): string {
-  const bases = new Set(files.map((file) => file.base ?? ''));
-  if (bases.size !== 1) return '';
-  const base = [...bases][0] as string;
-  if (base) return basename(base);
-  const virtual = new Set(files.map((file) => (file.origin?.startsWith('#') ? file.origin.slice(1).split('/')[0] : '')));
-  return virtual.size === 1 ? ([...virtual][0] as string) : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +358,7 @@ function parseComparison(text: string): ((n: number) => boolean) | string {
 }
 
 /** Fills the facts a `when` needs through the probe. Without one the file fails the `when`; warned once. */
-async function probeFacts(file: AssetFile, needs: string[], probe: Probe | undefined, warnings: string[]): Promise<void> {
+async function fillFacts(file: AssetFile, needs: string[], probe: Probe | undefined, warnings: string[]): Promise<void> {
   const missing = needs.filter((fact) => file.meta[fact] === undefined);
   if (!missing.length) return;
   if (probe) Object.assign(file.meta, await probe(file.data));
