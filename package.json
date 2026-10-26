@@ -1,6 +1,6 @@
 {
   "name": "@smoud/assets",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "One config. One command. All your game assets optimized. Image optimization, conversion, resizing, texture atlases and data minification for HTML5 games and playable ads.",
   "keywords": [
     "assets",
@@ -66,7 +66,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "node --test tests/",
-    "sandbox": "node dist/cli.js watch --config sandbox/assets.json --verbose",
+    "sandbox": "node dist/cli.js build --config sandbox/assets.json --verbose",
     "sandbox:js": "node sandbox/assets.js",
     "deploy": "npm run build && npm run test && npm publish --access public"
   },

@@ -36,12 +36,15 @@ export interface BuildOptions {
   dryRun?: boolean;
   /** Warnings count as failure. */
   strict?: boolean;
+  /** Reuse cached results for unchanged files, over the config's `cache`. Default `false`. */
+  cache?: boolean;
 }
 
 /** Everything one build run keeps track of while its actions run. */
 interface BuildState {
   config: PreparedConfig;
   staging: string;
+  cache: boolean;
   /** The config's ignore patterns plus the destination when it sits inside the source. */
   ignore: string[];
   result: BuildResult;
@@ -82,6 +85,7 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
   const state: BuildState = {
     config,
     staging,
+    cache: options.cache ?? config.cache ?? false,
     ignore,
     result,
     taken: new Set(),
@@ -94,7 +98,8 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 
   for (const action of config.actions) {
     const files = await selectActionFiles(action, state);
-    if (!files) continue;
+    // a preset is written for many projects, so its actions that find nothing in this one are skipped quietly
+    if (!files || (action.fromPreset && !files.length)) continue;
     const origins = files.map((file) => file.origin as string);
     for (const origin of origins) {
       state.taken.add(origin);
@@ -153,10 +158,16 @@ async function runAction(action: PreparedAction, files: AssetFile[], state: Buil
   const target = action.destination;
   const virtual = target.folder?.startsWith('#') ? parseVirtualFolder(target.folder) : undefined;
 
-  // the action runs in memory; only the filename template goes along, so an atlas can predict its page names
+  // the action runs in memory; only the filename template goes along, so an atlas can predict its page names.
+  // `cache` goes only to actions that set it: an action with its own `process` would take it for an unknown option
   let result: ActionResult;
   try {
-    result = await action.action.process({ ...action.options, source: files, destination: { filename: target.filename } });
+    result = await action.action.process({
+      ...action.options,
+      source: files,
+      destination: { filename: target.filename },
+      ...(state.cache && action.action.cache ? { cache: true } : {})
+    });
   } catch (error) {
     state.result.errors.push(`${where}: ${(error as Error).message}`);
     return;

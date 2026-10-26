@@ -39,6 +39,7 @@ export function formatReport(input: ActionResult | ActionResult[] | BuildResult,
         : coloredChange(result.bytesIn, result.bytesOut);
       columns.push(`${formatBytes(result.bytesIn)} → ${formatBytes(result.bytesOut)}`, change);
       if (inMemory) columns.push(dim(`→ ${memoryTarget(result)}`));
+      if (result.fromCache) columns.push(dim(`(${result.fromCache} from cache)`));
     }
     lines.push(columns.join('  '));
 
@@ -57,8 +58,10 @@ export function formatReport(input: ActionResult | ActionResult[] | BuildResult,
   let bytesIn = 0;
   let bytesOut = 0;
   let keptOriginals = 0;
+  let cached = 0;
   for (const result of results) {
     if (result.memorySource === undefined) {
+      cached += result.fromCache;
       files += result.selected;
       bytesIn += result.bytesIn;
     }
@@ -67,7 +70,8 @@ export function formatReport(input: ActionResult | ActionResult[] | BuildResult,
   }
   lines.push('');
   lines.push(
-    `${bold('Total'.padEnd(labelWidth + 5))}  ${plural(files, 'file').padStart(9)}  ${formatBytes(bytesIn)} → ${formatBytes(bytesOut)}  ${coloredChange(bytesIn, bytesOut)}`
+    `${bold('Total'.padEnd(labelWidth + 5))}  ${plural(files, 'file').padStart(9)}  ${formatBytes(bytesIn)} → ${formatBytes(bytesOut)}  ${coloredChange(bytesIn, bytesOut)}` +
+      (cached ? dim(`  (${cached} from cache)`) : '')
   );
   if (keptOriginals) lines.push(dim(`${plural(keptOriginals, 'original')} kept because re-encoding would have grown them`));
   if (build?.unselected.length) {

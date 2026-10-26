@@ -2,9 +2,12 @@
  * smoud-assets — CLI entry.
  */
 
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { build, formatReport, version } from './index.js';
+import { build, formatReport, loadPreset, version } from './index.js';
 import { red } from './utils/colors.js';
+import { statOrNull } from './utils/fs.js';
 import { watch } from './watch.js';
 
 const HELP = `smoud-assets v${version}
@@ -26,6 +29,7 @@ Options
   --strict               Treat warnings as errors
   --verbose              List every file
   --dry-run              Process everything, write nothing
+  --cache / --no-cache   Reuse results for unchanged files (build: off, watch: on)
   -h, --help             Show this help
   -v, --version          Show the version
 `;
@@ -44,6 +48,9 @@ async function main(argv: string[]): Promise<number> {
         strict: { type: 'boolean', default: false },
         verbose: { type: 'boolean', default: false },
         'dry-run': { type: 'boolean', default: false },
+        // two flags: Node 20 cannot derive --no-cache from --cache
+        cache: { type: 'boolean' },
+        'no-cache': { type: 'boolean' },
         help: { type: 'boolean', short: 'h', default: false },
         version: { type: 'boolean', short: 'v', default: false }
       }
@@ -64,6 +71,9 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  // undefined: neither flag given, so the config or the command's own default decides
+  const cache = values['no-cache'] ? false : values.cache ? true : undefined;
+
   switch (command) {
     case 'build': {
       try {
@@ -73,7 +83,8 @@ async function main(argv: string[]): Promise<number> {
           source: values.source as string | undefined,
           destination: values.destination as string | undefined,
           dryRun: Boolean(values['dry-run']),
-          strict: Boolean(values.strict)
+          strict: Boolean(values.strict),
+          cache
         });
         process.stdout.write(`${formatReport(result, { verbose: Boolean(values.verbose) })}\n`);
         return result.ok ? 0 : 1;
@@ -91,13 +102,28 @@ async function main(argv: string[]): Promise<number> {
         destination: values.destination as string | undefined,
         dryRun: Boolean(values['dry-run']),
         strict: Boolean(values.strict),
-        verbose: Boolean(values.verbose)
+        verbose: Boolean(values.verbose),
+        cache
       });
       return 0;
 
-    case 'init':
-      process.stderr.write(`"${command}" is not implemented yet.\n`);
-      return 1;
+    case 'init': {
+      const file = path.resolve((values.config as string | undefined) ?? 'assets.json');
+      if (await statOrNull(file)) {
+        process.stdout.write(`${path.relative(process.cwd(), file)} already exists, skipped\n`);
+        return 0;
+      }
+      // the preset written out in full, so every action is there to change
+      const preset = await loadPreset((values.preset as string | undefined) ?? 'default', process.cwd());
+      const config = {
+        source: (values.source as string | undefined) ?? 'assets',
+        destination: (values.destination as string | undefined) ?? 'assets/compiled',
+        ...preset
+      };
+      await fs.writeFile(file, `${JSON.stringify(config, null, 2)}\n`);
+      process.stdout.write(`Created ${path.relative(process.cwd(), file)}\n`);
+      return 0;
+    }
 
     default:
       process.stderr.write(`${red(`Unknown command "${command}".`)}\n\n${HELP}`);

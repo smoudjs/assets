@@ -116,8 +116,11 @@ assets/compiled/
 | `defaults`    | Starting options per action, see [Defaults](#defaults).                           | none                                  |
 | `actions`     | The list of actions, run top to bottom.                                           | none                                  |
 | `clean`       | Remove files from the destination that this build did not produce.                | `true`                                |
+| `cache`       | Reuse earlier results for unchanged files.                                        | `false`, `true` for `watch`           |
 
 `source` and `destination` are always folders, never patterns. The command line flags `--source` and `--destination` override them.
+
+With `cache` on, results are kept in `node_modules/.cache/smoud-assets` and reused as long as the file, the options and the action stay the same. Entries older than 30 days are removed, and when the cache passes 1 GB the oldest go until half is left.
 
 ### Actions
 
@@ -286,13 +289,14 @@ The rules:
 3. Results are written to `<destination>/.staging`.
 4. When nothing failed, the staged files move into the destination. With `clean` on, files no action produced are removed.
 
-If anything fails, the staging folder is deleted and the destination stays exactly as it was. Warnings do not stop a build unless you pass `--strict`. With `--dry-run` nothing is written at all.
+If anything fails, the staging folder is deleted and the destination stays exactly as it was. Warnings do not stop a build unless you pass `--strict`. With `--dry-run` nothing is written to the destination. The cache, when on, is still filled.
 
 ## Command line
 
 ```sh
 npx smoud-assets build [options]   # build once
 npx smoud-assets watch [options]   # build, then rebuild on every change
+npx smoud-assets init [options]    # write a starter assets.json
 ```
 
 `watch` follows the source folder, the config and a preset file.
@@ -306,6 +310,7 @@ npx smoud-assets watch [options]   # build, then rebuild on every change
 | `--strict`            | Warnings count as failure.                                     |
 | `--verbose`           | One line per file, and every warning instead of the first ten. |
 | `--dry-run`           | Process everything, write nothing.                             |
+| `--[no-]cache`        | Use the cache. Off for `build`, on for `watch`.                |
 | `-h, --help`          | Show help.                                                     |
 | `-v, --version`       | Show the version.                                              |
 
@@ -562,6 +567,7 @@ console.log(formatReport(results, { verbose: true }));
 | `action`      | The action name.                                                                     |
 | `label`       | Short description, like `image, source "ui"`.                                        |
 | `selected`    | How many files the action received.                                                  |
+| `fromCache`   | How many of them came from the cache.                                                |
 | `files`       | One row per source file: `source`, `outputs`, `bytesIn`, `bytesOut`, `keptOriginal`. |
 | `outputs`     | The produced files, in memory.                                                       |
 | `destination` | The folder written to, or `null` when nothing was written.                           |
@@ -594,6 +600,8 @@ import { actions } from '@smoud/assets';
 
 const upper = actions.register({
   name: 'upper',
+  version: 1,
+  cache: true,
   accepts: ['txt'],
   options: {
     suffix: { kind: 'string', description: 'Added to the file name', default: '' }
@@ -621,6 +629,8 @@ await upper.process({ source: 'texts', destination: 'public/texts', suffix: '-lo
 ```
 
 `register` adds `process` around your `transform`. It selects the files with `accepts` and `probe`, checks the options and fills their defaults, writes the outputs, and builds the result for the report.
+
+`cache: true` lets the cache keep each file's result. Use `cache: 'together'` when every output depends on all the files, like an atlas. Caching needs a `version`: raise it whenever you change what the action produces, or old results keep coming back. Without `cache`, the action always runs.
 
 **What `transform` gets and returns:**
 

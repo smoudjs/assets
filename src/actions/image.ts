@@ -227,6 +227,9 @@ const options: OptionTable = {
 /** Resize, trim, convert and compress images with Sharp. */
 export const image: ImageAction = {
   name: 'image',
+  // bump whenever a code change alters the output: cached results of older versions stop matching
+  version: 1,
+  cache: true,
   accepts: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'tif', 'tiff', 'svg'],
   options,
 

@@ -76,6 +76,8 @@ export interface AssetsConfig {
   actions?: ActionEntry[];
   /** Remove stale files from the destination after a successful build. Default `true`. */
   clean?: boolean;
+  /** Reuse results from `node_modules/.cache/smoud-assets` for unchanged files. Default `false` for build, `true` for watch. */
+  cache?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +141,8 @@ export interface ProcessParams {
   source: Source | AssetFile[];
   /** A folder, or a `#virtual` folder. Omitted: nothing is written and the outputs come back on the result. */
   destination?: Destination;
+  /** Reuse cached results for unchanged files. Only for actions that set `cache`. Default `false`. */
+  cache?: boolean;
 }
 
 /** What `transform` gets besides the files and options. */
@@ -166,6 +170,13 @@ export interface TransformResult {
 export interface ActionDefinition<O extends Record<string, unknown> = Record<string, unknown>> {
   /** The word users write after `"action":`. */
   name: string;
+  /** Change it whenever the action's code changes what it produces. Required with `cache`. */
+  version?: string | number;
+  /**
+   * Whether results can be cached: `true` caches each file on its own, `'together'` caches all files of a call as one
+   * (for outputs that depend on every input, like an atlas). Only for actions with a `transform`. Default `false`.
+   */
+  cache?: boolean | 'together';
   /** Lower-case extensions without the dot this action handles, or `'*'` for every file. */
   accepts: readonly string[] | '*';
   options: OptionTable;
@@ -206,6 +217,8 @@ export interface ActionResult {
   label: string;
   /** How many source files the action received. */
   selected: number;
+  /** How many of them came from the cache instead of being processed. */
+  fromCache: number;
   /** Set when the files came from memory: the virtual folder's name, or `memory` for files handed in directly. Those bytes are not source bytes. */
   memorySource?: string;
   /** One per source file, or one for all of them when the action packs its files into group outputs (atlas). */

@@ -12,7 +12,7 @@ import { isPathUnderFolder, samePath, statOrNull, toPosix } from './utils/fs.js'
 import { deepMerge, isObject, toArray } from './utils/object.js';
 import { suggest } from './utils/similarity.js';
 
-const TOP_LEVEL_KEYS = ['preset', 'source', 'destination', 'ignore', 'defaults', 'actions', 'clean'];
+const TOP_LEVEL_KEYS = ['preset', 'source', 'destination', 'ignore', 'defaults', 'actions', 'clean', 'cache'];
 const PRESET_KEYS = ['defaults', 'actions'];
 const ACTION_KEYS = ['action', 'source', 'destination'];
 const SOURCE_KEYS = ['include', 'exclude', 'when'];
@@ -79,6 +79,8 @@ export interface PreparedConfig {
   destination: string;
   ignore: string[];
   clean: boolean;
+  /** Undefined when the config does not say: build and watch each have their own default. */
+  cache?: boolean;
   /** The config's own actions first, then the preset's. */
   actions: PreparedAction[];
   warnings: string[];
@@ -111,6 +113,13 @@ export async function prepareConfig(
   const messages: Messages = { actionCount: 0, warnings: prepared.warnings, errors: prepared.errors };
   warnUnknownKeys(config as Record<string, unknown>, TOP_LEVEL_KEYS, 'config', messages);
   prepared.ignore = parsePatterns(config.ignore, 'config ignore', messages);
+  for (const key of ['clean', 'cache'] as const) {
+    const value = config[key];
+    if (value !== undefined && typeof value !== 'boolean') {
+      prepared.errors.push(`"${key}" must be true or false, got ${JSON.stringify(value)}`);
+    }
+  }
+  if (typeof config.cache === 'boolean') prepared.cache = config.cache;
 
   const ownEntries: unknown = config.actions ?? [];
   if (!Array.isArray(ownEntries)) {
@@ -243,8 +252,8 @@ export function presetFilePath(name: string, fromDir: string): string | undefine
   return name.startsWith('.') || path.isAbsolute(name) || name.endsWith('.json') ? path.resolve(fromDir, name) : undefined;
 }
 
-/** Resolution order: a path, then a built-in `presets/<name>.json` of the package, then an installed package. */
-async function loadPreset(name: string, fromDir: string): Promise<AssetsConfig> {
+/** A preset's content. Resolution order: a path, then a built-in `presets/<name>.json` of the package, then an installed package. */
+export async function loadPreset(name: string, fromDir: string): Promise<AssetsConfig> {
   const file = presetFilePath(name, fromDir);
   if (file) return readConfigFile(file);
   if (/^[\w-]+$/.test(name)) {

@@ -4,7 +4,7 @@
 import { watch as watchPath, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 // the engine comes from index.js like in cli.ts: the CLI bundle shares it with dist/index.js, where actions are registered
-import { build, formatReport, presetFilePath, readConfigFile, type BuildOptions } from './index.js';
+import { build, formatReport, presetFilePath, readConfigFile, type AssetsConfig, type BuildOptions } from './index.js';
 import { dim, red } from './utils/colors.js';
 import { isPathUnderFolder, samePath, toPosix } from './utils/fs.js';
 
@@ -58,8 +58,8 @@ export async function watch(options: WatchOptions): Promise<void> {
     });
   };
 
-  const watchPreset = async (): Promise<void> => {
-    const file = await findPresetFile(options.preset, configFile);
+  const watchPreset = (config: AssetsConfig): void => {
+    const file = findPresetFile(options.preset ?? config.preset, configFile);
     if (preset && file && samePath(preset.path, file)) return;
     preset?.watcher.close();
     preset = undefined;
@@ -68,15 +68,18 @@ export async function watch(options: WatchOptions): Promise<void> {
   };
 
   const runBuild = async (): Promise<void> => {
+    // read here only for what watch decides itself; build reads and checks the config on its own
+    const config = await readConfigOrEmpty(configFile);
+    const cache = options.cache ?? (typeof config.cache === 'boolean' ? config.cache : true);
     try {
-      const result = await build(options);
+      const result = await build({ ...options, cache });
       process.stdout.write(`${formatReport(result, { verbose: options.verbose })}\n`);
       destination = result.destination;
       watchSource(result.source);
     } catch (error) {
       process.stderr.write(`${red(`error: ${(error as Error).message}`)}\n`);
     }
-    await watchPreset();
+    watchPreset(config);
   };
 
   const rebuild = async (): Promise<void> => {
@@ -123,15 +126,16 @@ function startWatcher(folder: string, recursive: boolean, onChange: (changed: st
   }
 }
 
-// only a preset given as a path can change while you work; built-in and package presets cannot
-async function findPresetFile(presetOverride: string | undefined, configFile: string): Promise<string | undefined> {
-  let name: unknown = presetOverride;
-  if (name === undefined) {
-    try {
-      name = (await readConfigFile(configFile)).preset;
-    } catch {
-      return undefined;
-    }
+// a missing or broken config reads as empty here; the build reports what is wrong with it
+async function readConfigOrEmpty(configFile: string): Promise<AssetsConfig> {
+  try {
+    return await readConfigFile(configFile);
+  } catch {
+    return {};
   }
+}
+
+// only a preset given as a path can change while you work; built-in and package presets cannot
+function findPresetFile(name: unknown, configFile: string): string | undefined {
   return typeof name === 'string' ? presetFilePath(name, path.dirname(configFile)) : undefined;
 }

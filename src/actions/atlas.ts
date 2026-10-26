@@ -100,6 +100,9 @@ const options: OptionTable = {
 /** Packs sprites into texture atlas pages with a TexturePacker-style JSON per page. */
 export const atlas: AtlasAction = {
   name: 'atlas',
+  // bump whenever a code change alters the output: cached results of older versions stop matching
+  version: 1,
+  cache: 'together',
   accepts: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'tif', 'tiff'],
   options,
 

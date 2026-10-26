@@ -1,8 +1,8 @@
 {
   "actions": [
     { "action": "image", "source": { "exclude": "*.svg" } },
-    "json",
-    "xml",
+    { "action": "json" },
+    { "action": "xml" },
     { "action": "copy", "source": "#rest" }
   ]
 }

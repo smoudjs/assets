@@ -2,6 +2,7 @@
 
 import { cpus } from 'node:os';
 import path from 'node:path';
+import { cacheKey, readCache, writeCache } from '../cache.js';
 import { destinationPath, isFileList, normalizeDestination, selectFiles, writeFiles } from '../files.js';
 import type {
   ActionDefinition,
@@ -14,9 +15,10 @@ import type {
   ProcessParams,
   RegisteredAction,
   Source,
+  TransformContext,
   TransformResult
 } from '../types.js';
-import { join } from '../utils/fs.js';
+import { contentHash, join } from '../utils/fs.js';
 import { isObject, toArray } from '../utils/object.js';
 import { suggest } from '../utils/similarity.js';
 
@@ -33,14 +35,24 @@ export const actions: ActionRegistry = Object.defineProperty(registry, 'register
   enumerable: false
 }) as ActionRegistry;
 
+// the `process` functions `register` made, so registering the same action again is not taken for a custom `process`
+const builtProcesses = new WeakSet<object>();
+
 // an action that wrote its own `process` keeps it; otherwise `process` is built around its `transform`
 function register<A extends ActionDefinition<any>>(definition: A): RegisteredAction<A> {
   const { name } = definition;
   if (!/^[a-z][\w-]*$/i.test(name) || name === 'register') throw new Error(`"${name}" is not a valid action name`);
   const action = definition as RegisteredAction<A>;
+  const customProcess = action.process && !builtProcesses.has(action.process);
+  if (action.cache) {
+    if (customProcess)
+      throw new Error(`action "${name}" sets cache, which works only with a transform, not its own process`);
+    if (action.version === undefined) throw new Error(`action "${name}" sets cache, so it needs a version`);
+  }
   if (!action.process) {
     if (!action.transform) throw new Error(`action "${name}" needs a transform or a process function`);
     action.process = (input) => processWithTransform(action, input);
+    builtProcesses.add(action.process);
   }
   registry[name] = action as RegisteredAction;
   return action;
@@ -49,46 +61,115 @@ function register<A extends ActionDefinition<any>>(definition: A): RegisteredAct
 /** The `process` every action with a `transform` gets: select, check the options, transform, write, report. */
 async function processWithTransform(
   action: ActionDefinition,
-  { source, destination, ...input }: ProcessParams & Record<string, unknown>
+  { source, destination, cache, ...input }: ProcessParams & Record<string, unknown>
 ): Promise<ActionResult> {
   const started = performance.now();
   const options = resolveOptions(action.options, input);
   const selection = await selectFiles(source, { accepts: action.accepts, probe: action.probe });
-  const warnings = [...selection.warnings];
-  const errors: string[] = [];
-  let outputs: AssetFile[] = [];
+  const context: TransformContext = {
+    folderName: selection.folderName,
+    filenameTemplate: normalizeDestination(destination).filename as string
+  };
+  let result: Transformed = { outputs: [], warnings: [], errors: [], fromCache: 0 };
   try {
-    const context = {
-      folderName: selection.folderName,
-      filenameTemplate: normalizeDestination(destination).filename as string
-    };
-    const result = await (action.transform as NonNullable<ActionDefinition['transform']>)(selection.files, options, context);
-    if (Array.isArray(result)) outputs = result;
-    else {
-      outputs = result.outputs;
-      warnings.push(...(result.warnings ?? []));
-      errors.push(...(result.errors ?? []));
-    }
+    result =
+      cache && action.cache
+        ? await transformWithCache(action, selection.files, options, context)
+        : await runTransform(action, selection.files, options, context);
   } catch (error) {
-    errors.push((error as Error).message);
+    result.errors.push((error as Error).message);
   }
   return finishAction({
     action: action.name,
     source,
     destination,
     inputs: selection.files,
-    outputs,
-    warnings,
-    errors,
+    outputs: result.outputs,
+    warnings: [...selection.warnings, ...result.warnings],
+    errors: result.errors,
+    fromCache: result.fromCache,
     started
   });
+}
+
+/** What a transform gave, in one shape, and how many of its inputs came from the cache. */
+interface Transformed {
+  outputs: AssetFile[];
+  warnings: string[];
+  errors: string[];
+  fromCache: number;
+}
+
+async function runTransform(
+  action: ActionDefinition,
+  files: AssetFile[],
+  options: Record<string, unknown>,
+  context: TransformContext
+): Promise<Transformed> {
+  const result = await (action.transform as NonNullable<ActionDefinition['transform']>)(files, options, context);
+  if (Array.isArray(result)) return { outputs: result, warnings: [], errors: [], fromCache: 0 };
+  return { outputs: result.outputs, warnings: result.warnings ?? [], errors: result.errors ?? [], fromCache: 0 };
+}
+
+// `cache: true` gives every file its own entry and runs each missed file through `transform` alone, so its outputs
+// and warnings are known to be its own; `'together'` gives all files one entry. Results with errors are not stored.
+async function transformWithCache(
+  action: ActionDefinition,
+  files: AssetFile[],
+  options: Record<string, unknown>,
+  context: TransformContext
+): Promise<Transformed> {
+  const keyFor = (inputs: AssetFile[]): string =>
+    cacheKey([action.name, action.version, options, context, inputs.map(describeInput)]);
+  const transformAndStore = async (key: string, inputs: AssetFile[]): Promise<Transformed> => {
+    const result = await runTransform(action, inputs, options, context);
+    if (!result.errors.length) await writeCache(key, result);
+    return result;
+  };
+
+  if (action.cache === 'together') {
+    const key = keyFor(files);
+    const cached = await readCache(key);
+    return cached ? { ...cached, errors: [], fromCache: files.length } : transformAndStore(key, files);
+  }
+
+  const results: Transformed[] = new Array(files.length);
+  await forEachConcurrently(files, async (file, index) => {
+    const key = keyFor([file]);
+    const cached = await readCache(key);
+    if (cached) results[index] = { ...cached, errors: [], fromCache: 1 };
+    else {
+      try {
+        results[index] = await transformAndStore(key, [file]);
+      } catch (error) {
+        results[index] = {
+          outputs: [],
+          warnings: [],
+          errors: [`${file.origin ?? file.path}: ${(error as Error).message}`],
+          fromCache: 0
+        };
+      }
+    }
+  });
+  return {
+    outputs: results.flatMap((result) => result.outputs),
+    warnings: results.flatMap((result) => result.warnings),
+    errors: results.flatMap((result) => result.errors),
+    fromCache: results.reduce((total, result) => total + result.fromCache, 0)
+  };
+}
+
+// everything about an input that can change what comes out; `meta` is left out because it is read from the bytes
+function describeInput(file: AssetFile): unknown {
+  const { path: filePath, origin, selectedFrom, filenameTokens } = file;
+  return { path: filePath, origin, selectedFrom, filenameTokens, hash: contentHash(file.data) };
 }
 
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
 
-const RESERVED_KEYS = ['source', 'destination'];
+const RESERVED_KEYS = ['source', 'destination', 'cache'];
 
 /**
  * The options an action runs with: every value checked against the table, every missing key filled with its
@@ -217,20 +298,25 @@ export async function transformFiles(
 ): Promise<TransformResult & { errors: string[] }> {
   const errors: string[] = [];
   const outputs: Array<AssetFile | null> = new Array(files.length).fill(null);
+  await forEachConcurrently(files, async (file, index) => {
+    try {
+      outputs[index] = await transformFile(file);
+    } catch (error) {
+      errors.push(`${file.origin ?? file.path}: ${(error as Error).message}`);
+    }
+  });
+  return { outputs: outputs.filter((output): output is AssetFile => output !== null), errors };
+}
+
+async function forEachConcurrently<T>(items: T[], work: (item: T, index: number) => Promise<void>): Promise<void> {
   let next = 0;
-  const worker = async () => {
-    while (next < files.length) {
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
       const index = next++;
-      const file = files[index] as AssetFile;
-      try {
-        outputs[index] = await transformFile(file);
-      } catch (error) {
-        errors.push(`${file.origin ?? file.path}: ${(error as Error).message}`);
-      }
+      await work(items[index] as T, index);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, worker));
-  return { outputs: outputs.filter((output): output is AssetFile => output !== null), errors };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, worker));
 }
 
 /** What one `process` call did, which `finishAction` turns into its result. For actions that write their own `process`. */
@@ -244,6 +330,8 @@ export interface ActionOutcome {
   outputs: AssetFile[];
   warnings: string[];
   errors: string[];
+  /** How many inputs came from the cache. Default 0. */
+  fromCache?: number;
   /** `performance.now()` when `process` began. */
   started: number;
 }
@@ -303,6 +391,7 @@ export async function finishAction(outcome: ActionOutcome): Promise<ActionResult
     action,
     label: actionLabel(action, source),
     selected: inputs.length,
+    fromCache: outcome.fromCache ?? 0,
     ...(origins.length && memorySources.size === 1 && !memorySources.has('') ? { memorySource: [...memorySources][0] } : {}),
     files: [...rows.values()],
     outputs,
