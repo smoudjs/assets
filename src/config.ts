@@ -1,8 +1,5 @@
-// Everything about assets.json as a document: reading it, checking its keys, expanding presets and resolving
+// Everything about assets.json as a document: reading it, merging its preset, checking its keys and resolving
 // the base folders. Out comes the list of actions ready to run, in order, and the two absolute folders.
-//   "image"                          → an action with default settings
-//   { action, source, destination }  → an action
-//   { preset, source, destination }  → a group: the preset's actions, scoped by this entry
 
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -10,14 +7,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actionLabel, actions, parseVirtualFolder, resolveOptions } from './actions/index.js';
 import { normalizeDestination } from './files.js';
-import type { ActionDefinition, AssetsConfig, Defaults, DestinationSpec, WhenSpec } from './types.js';
-import { exists, isPathUnderFolder, samePath, toPosix } from './utils/fs.js';
+import type { AssetsConfig, Defaults, DestinationSpec, RegisteredAction, WhenSpec } from './types.js';
+import { isPathUnderFolder, samePath, statOrNull, toPosix } from './utils/fs.js';
 import { deepMerge, isObject, toArray } from './utils/object.js';
 import { suggest } from './utils/similarity.js';
 
-const TOP_LEVEL_KEYS = ['source', 'destination', 'ignore', 'defaults', 'actions', 'clean'];
+const TOP_LEVEL_KEYS = ['preset', 'source', 'destination', 'ignore', 'defaults', 'actions', 'clean'];
+const PRESET_KEYS = ['defaults', 'actions'];
 const ACTION_KEYS = ['action', 'source', 'destination'];
-const PRESET_KEYS = ['preset', 'source', 'destination', 'defaults'];
 const SOURCE_KEYS = ['include', 'exclude', 'when'];
 const DESTINATION_KEYS = ['folder', 'filename'];
 
@@ -31,7 +28,7 @@ export interface LoadedConfig {
 export async function loadConfig(input: string | AssetsConfig | undefined): Promise<LoadedConfig> {
   if (input !== undefined && typeof input !== 'string') return { config: input, dir: process.cwd() };
   const configPath = path.resolve(input ?? 'assets.json');
-  if (input === undefined && !(await exists(configPath))) return { config: {}, dir: process.cwd() };
+  if (input === undefined && !(await statOrNull(configPath))) return { config: {}, dir: process.cwd() };
   return { config: await readConfigFile(configPath), dir: path.dirname(configPath) };
 }
 
@@ -63,28 +60,18 @@ export interface PreparedSource {
 }
 
 export interface PreparedAction {
-  kind: 'action';
   /** 1-based position among the actions, for messages. */
   index: number;
   label: string;
-  action: ActionDefinition;
+  action: RegisteredAction;
   /** Checked and filled with defaults. */
   options: Record<string, unknown>;
   source: PreparedSource;
   /** `folder` undefined: each output lands where its source was. */
   destination: DestinationSpec;
+  /** Comes from the preset: it only sees the files the config's own actions left. */
+  fromPreset: boolean;
 }
-
-/** A preset entry: its actions run inside the scope of this entry's source and destination. */
-export interface PreparedGroup {
-  kind: 'group';
-  label: string;
-  source: PreparedSource;
-  destination?: DestinationSpec;
-  items: PreparedItem[];
-}
-
-export type PreparedItem = PreparedAction | PreparedGroup;
 
 export interface PreparedConfig {
   /** Absolute base folders, after the checks that keep a build from writing over its own source. */
@@ -92,7 +79,8 @@ export interface PreparedConfig {
   destination: string;
   ignore: string[];
   clean: boolean;
-  items: PreparedItem[];
+  /** The config's own actions first, then the preset's. */
+  actions: PreparedAction[];
   warnings: string[];
   errors: string[];
 }
@@ -104,33 +92,58 @@ interface Messages {
   errors: string[];
 }
 
-/** The document checked and expanded. Folder problems throw; everything else lands in `warnings` and `errors`. */
+/** The document checked, with its preset merged. Folder problems throw; everything else lands in `warnings` and `errors`. */
 export async function prepareConfig(
   config: AssetsConfig,
   dir: string,
-  overrides: { source?: string; destination?: string } = {}
+  overrides: { source?: string; destination?: string; preset?: string } = {}
 ): Promise<PreparedConfig> {
   const folders = resolveFolders(config, dir, overrides);
+  await checkFolders(folders.source, folders.destination);
   const prepared: PreparedConfig = {
     ...folders,
     ignore: [],
     clean: config.clean !== false,
-    items: [],
+    actions: [],
     warnings: [],
     errors: []
   };
-  await checkFolders(folders.source, folders.destination);
-
   const messages: Messages = { actionCount: 0, warnings: prepared.warnings, errors: prepared.errors };
   warnUnknownKeys(config as Record<string, unknown>, TOP_LEVEL_KEYS, 'config', messages);
   prepared.ignore = parsePatterns(config.ignore, 'config ignore', messages);
-  const defaults = parseDefaults(config.defaults, 'config defaults', messages);
-  const entries: unknown = config.actions ?? [{ preset: 'default' }];
-  if (!Array.isArray(entries)) {
+
+  const ownEntries: unknown = config.actions ?? [];
+  if (!Array.isArray(ownEntries)) {
     prepared.errors.push('"actions" must be a list');
     return prepared;
   }
-  prepared.items = await expandEntries(entries, [defaults], dir, messages);
+
+  let preset: AssetsConfig = {};
+  const presetName = overrides.preset ?? config.preset ?? (config.actions === undefined ? 'default' : undefined);
+  if (presetName !== undefined) {
+    const where = `preset "${presetName}"`;
+    try {
+      preset = await loadPreset(presetName, dir);
+    } catch (error) {
+      prepared.errors.push(`${where}: ${(error as Error).message}`);
+      return prepared;
+    }
+    warnUnknownKeys(preset as Record<string, unknown>, PRESET_KEYS, where, messages);
+    if (!Array.isArray(preset.actions)) {
+      prepared.errors.push(`${where}: the preset has no "actions"`);
+      return prepared;
+    }
+  }
+
+  // the config's defaults win over the preset's, key by key
+  const defaults = deepMerge(
+    parseDefaults(preset.defaults, `preset "${presetName}", defaults`, messages),
+    parseDefaults(config.defaults, 'config defaults', messages)
+  ) as Defaults;
+  prepared.actions = [
+    ...prepareActions(ownEntries, defaults, false, messages),
+    ...prepareActions(preset.actions ?? [], defaults, true, messages)
+  ];
   return prepared;
 }
 
@@ -153,10 +166,10 @@ function resolveFolders(
 
 // the three layouts refused here would let `clean` delete the source or the project
 async function checkFolders(source: string, destination: string): Promise<void> {
-  const sourceStat = await fs.stat(source).catch(() => null);
+  const sourceStat = await statOrNull(source);
   if (!sourceStat) throw new Error(`Source folder not found: ${source}`);
   if (!sourceStat.isDirectory()) throw new Error(`Source must be a folder: ${source}`);
-  const destinationStat = await fs.stat(destination).catch(() => null);
+  const destinationStat = await statOrNull(destination);
   if (destinationStat && !destinationStat.isDirectory()) throw new Error(`Destination must be a folder: ${destination}`);
 
   if (samePath(destination, source)) throw new Error('Destination must not be the same folder as the source');
@@ -164,27 +177,21 @@ async function checkFolders(source: string, destination: string): Promise<void> 
   if (isPathUnderFolder(source, destination)) throw new Error('Destination must not contain the source folder');
 }
 
-async function expandEntries(
-  entries: unknown[],
-  defaultsChain: Defaults[],
-  dir: string,
-  messages: Messages
-): Promise<PreparedItem[]> {
-  const items: PreparedItem[] = [];
+function prepareActions(entries: unknown[], defaults: Defaults, fromPreset: boolean, messages: Messages): PreparedAction[] {
+  const prepared: PreparedAction[] = [];
   for (const [i, raw] of entries.entries()) {
     const entry = typeof raw === 'string' ? { action: raw } : raw;
-    const position = `entry ${i + 1}`;
+    const position = `${fromPreset ? 'preset entry' : 'entry'} ${i + 1}`;
     if (!isObject(entry)) {
-      messages.errors.push(`${position}: must be an action name, an action object or a preset object`);
+      messages.errors.push(`${position}: must be an action name or an action object`);
       continue;
     }
-    if (typeof entry['preset'] === 'string') {
-      const group = await expandPreset(entry, defaultsChain, dir, messages);
-      if (group) items.push(group);
+    if (entry['preset'] !== undefined) {
+      messages.errors.push(`${position}: a preset goes in the top-level "preset" key, not in "actions"`);
       continue;
     }
     if (typeof entry['action'] !== 'string') {
-      messages.errors.push(`${position}: needs "action" (an action type) or "preset" (a predefined set of actions)`);
+      messages.errors.push(`${position}: needs "action", the name of an action`);
       continue;
     }
 
@@ -200,7 +207,7 @@ async function expandEntries(
     messages.actionCount++;
     const where = `action ${messages.actionCount} (${label})`;
     const own = Object.fromEntries(Object.entries(entry).filter(([key]) => !ACTION_KEYS.includes(key)));
-    const merged = [...defaultsChain.map((defaults) => defaults[name] ?? {}), own].reduce(deepMerge, {});
+    const merged = deepMerge(defaults[name] ?? {}, own);
     // a typo in an option name is warned about and dropped, so one wrong key does not stop the whole build
     const known: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(merged)) {
@@ -218,67 +225,27 @@ async function expandEntries(
       messages.errors.push(`${where}: ${(error as Error).message}`);
       continue;
     }
-    items.push({
-      kind: 'action',
+    prepared.push({
       index: messages.actionCount,
       label,
       action,
       options,
       source: parseSource(entry['source'], where, messages),
-      destination: parseDestination(entry['destination'], where, messages)
+      destination: parseDestination(entry['destination'], where, messages),
+      fromPreset
     });
   }
-  return items;
-}
-
-async function expandPreset(
-  entry: Record<string, unknown>,
-  defaultsChain: Defaults[],
-  dir: string,
-  messages: Messages
-): Promise<PreparedGroup | null> {
-  const name = entry['preset'] as string;
-  const label = actionLabel(`preset ${name}`, entry['source'] as never);
-  const extra = Object.keys(entry).filter((key) => !PRESET_KEYS.includes(key));
-  if (extra.length) {
-    messages.errors.push(`${label}: a preset entry takes no options (${extra.join(', ')}); put them under "defaults"`);
-    return null;
-  }
-
-  let preset: AssetsConfig;
-  let presetDir: string;
-  try {
-    ({ preset, dir: presetDir } = await loadPreset(name, dir));
-  } catch (error) {
-    messages.errors.push(`${label}: ${(error as Error).message}`);
-    return null;
-  }
-  if (!Array.isArray(preset.actions)) {
-    messages.errors.push(`${label}: the preset has no "actions"`);
-    return null;
-  }
-
-  const chain = [preset.defaults ?? {}, ...defaultsChain, parseDefaults(entry['defaults'], `${label}, defaults`, messages)];
-  const group: PreparedGroup = {
-    kind: 'group',
-    label,
-    source: parseSource(entry['source'], label, messages),
-    items: await expandEntries(preset.actions, chain, presetDir, messages)
-  };
-  if (entry['destination'] !== undefined) group.destination = parseDestination(entry['destination'], label, messages);
-  return group;
+  return prepared;
 }
 
 /** Resolution order: a path, then a built-in `presets/<name>.json` of the package, then an installed package. */
-async function loadPreset(name: string, fromDir: string): Promise<{ preset: AssetsConfig; dir: string }> {
-  const isPath = name.startsWith('.') || path.isAbsolute(name) || name.endsWith('.json');
-  if (isPath) {
-    const file = path.resolve(fromDir, name);
-    return { preset: await readConfigFile(file), dir: path.dirname(file) };
+async function loadPreset(name: string, fromDir: string): Promise<AssetsConfig> {
+  if (name.startsWith('.') || path.isAbsolute(name) || name.endsWith('.json')) {
+    return readConfigFile(path.resolve(fromDir, name));
   }
   if (/^[\w-]+$/.test(name)) {
     const builtIn = fileURLToPath(new URL(`../presets/${name}.json`, import.meta.url));
-    if (await exists(builtIn)) return { preset: await readConfigFile(builtIn), dir: path.dirname(builtIn) };
+    if (await statOrNull(builtIn)) return readConfigFile(builtIn);
   }
   let file: string;
   try {
@@ -286,10 +253,10 @@ async function loadPreset(name: string, fromDir: string): Promise<{ preset: Asse
   } catch {
     throw new Error(`unknown preset "${name}"`);
   }
-  return { preset: await readConfigFile(file), dir: path.dirname(file) };
+  return readConfigFile(file);
 }
 
-function lookupAction(name: string): ActionDefinition | undefined {
+function lookupAction(name: string): RegisteredAction | undefined {
   const found = actions[name];
   return found && typeof found === 'object' ? found : undefined;
 }

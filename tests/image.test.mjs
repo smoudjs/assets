@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import sharp from 'sharp';
-import { image } from '../dist/index.js';
 import { run, scratchAssets } from './helpers.mjs';
 
 const facts = async (buffer) => {
   const meta = await sharp(buffer).metadata();
-  return { format: meta.format, width: meta.width, height: meta.pageHeight ?? meta.height, alpha: meta.hasAlpha, pages: meta.pages ?? 1 };
+  return {
+    format: meta.format,
+    width: meta.width,
+    height: meta.pageHeight ?? meta.height,
+    alpha: meta.hasAlpha,
+    pages: meta.pages ?? 1
+  };
 };
 
 describe('image: encode', () => {
@@ -49,8 +54,13 @@ describe('image: encode', () => {
 
   it('flattens alpha onto a colour for jpeg and warns when no colour is given', async () => {
     const warned = await run({ actions: [{ action: 'image', source: 'images/ui/logo.png', format: 'jpeg' }] });
-    assert.ok(warned.result.warnings.some((w) => w.includes('flatten')), warned.result.warnings.join('\n'));
-    const flat = await run({ actions: [{ action: 'image', source: 'images/ui/logo.png', format: 'jpeg', flatten: '#ffffff' }] });
+    assert.ok(
+      warned.result.warnings.some((w) => w.includes('flatten')),
+      warned.result.warnings.join('\n')
+    );
+    const flat = await run({
+      actions: [{ action: 'image', source: 'images/ui/logo.png', format: 'jpeg', flatten: '#ffffff' }]
+    });
     assert.deepEqual(flat.result.warnings, []);
     const info = await facts(await flat.read('images/ui/logo.jpg'));
     assert.equal(info.format, 'jpeg');
@@ -77,10 +87,31 @@ describe('image: geometry', () => {
 
   it('scale and exact width/height', async () => {
     const half = await run({ actions: [{ action: 'image', source: 'images/backgrounds/sky.jpg', resize: { scale: 0.5 } }] });
-    assert.deepEqual((({ width, height }) => [width, height])(await facts(await half.read('images/backgrounds/sky.jpg'))), [160, 120]);
-    const exact = await run({ actions: [{ action: 'image', source: 'images/textures/grass.png', resize: { width: 8, height: 8, kernel: 'nearest' } }] });
+    assert.deepEqual(
+      (({ width, height }) => [width, height])(await facts(await half.read('images/backgrounds/sky.jpg'))),
+      [160, 120]
+    );
+    const exact = await run({
+      actions: [{ action: 'image', source: 'images/textures/grass.png', resize: { width: 8, height: 8, kernel: 'nearest' } }]
+    });
     const grass = await facts(await exact.read('images/textures/grass.png'));
     assert.deepEqual([grass.width, grass.height], [8, 8]);
+  });
+
+  it('maxWidth and maxHeight shrink only bigger images, keep the aspect ratio, and keep the original rule working', async () => {
+    const { read } = await run({
+      actions: [{ action: 'image', source: 'images/backgrounds/sky.jpg', maxWidth: 100, maxHeight: 100 }]
+    });
+    const sky = await facts(await read('images/backgrounds/sky.jpg'));
+    assert.deepEqual([sky.width, sky.height], [100, 75]);
+    const { result } = await run({
+      actions: [{ action: 'image', source: 'images/photos', lossless: true, maxWidth: 4096 }]
+    });
+    assert.equal(
+      result.actions[0].files[0].keptOriginal,
+      true,
+      'an image under the limit is not resized, so its original can be kept'
+    );
   });
 
   it('trim removes transparent borders', async () => {
@@ -92,7 +123,9 @@ describe('image: geometry', () => {
   it('rasterizes svg at the given density', async () => {
     const low = await run({ actions: [{ action: 'image', source: 'images/ui/icons/check.svg', format: 'png' }] });
     assert.equal((await facts(await low.read('images/ui/icons/check.png'))).width, 64);
-    const high = await run({ actions: [{ action: 'image', source: 'images/ui/icons/check.svg', format: 'png', density: 144 }] });
+    const high = await run({
+      actions: [{ action: 'image', source: 'images/ui/icons/check.svg', format: 'png', density: 144 }]
+    });
     assert.equal((await facts(await high.read('images/ui/icons/check.png'))).width, 128);
   });
 });
@@ -119,12 +152,14 @@ describe('image: animation', () => {
 describe('image: when and failures', () => {
   it('when.alpha uses the probe', async () => {
     const { result } = await run({
-      actions: [{ action: 'image', source: { include: ['images/ui/buttons', 'images/backgrounds'], when: { alpha: false } } }]
+      actions: [
+        { action: 'image', source: { include: ['images/ui/buttons', 'images/backgrounds'], when: { alpha: false } } }
+      ]
     });
-    assert.deepEqual(
-      result.actions[0].files.map((f) => f.source).sort(),
-      ['images/backgrounds/forest/night.jpg', 'images/backgrounds/sky.jpg']
-    );
+    assert.deepEqual(result.actions[0].files.map((f) => f.source).sort(), [
+      'images/backgrounds/forest/night.jpg',
+      'images/backgrounds/sky.jpg'
+    ]);
   });
 
   it('a corrupt image fails the build and nothing is written', async () => {
@@ -132,16 +167,10 @@ describe('image: when and failures', () => {
     await assets.write('images/ui/broken.png', 'this is not a png');
     const { result, outputs } = await run({ source: assets.dir, actions: [{ action: 'image', source: 'images/ui' }] });
     assert.equal(result.ok, false);
-    assert.ok(result.errors.some((e) => e.includes('broken.png')), result.errors.join('\n'));
+    assert.ok(
+      result.errors.some((e) => e.includes('broken.png')),
+      result.errors.join('\n')
+    );
     assert.deepEqual(await outputs(), []);
-  });
-});
-
-describe('image()', () => {
-  it('returns converted files in memory', async () => {
-    const result = await image.process({ source: 'tests/assets/images/ui/buttons', format: 'webp', quality: 70 });
-    assert.equal(result.ok, true, result.errors.join('\n'));
-    assert.deepEqual(result.outputs.map((f) => f.path).sort(), ['pause.webp', 'play.webp']);
-    assert.equal((await facts(result.outputs[0].data)).format, 'webp');
   });
 });

@@ -22,6 +22,7 @@ import {
   isPathUnderFolder,
   join,
   renderFilename,
+  statOrNull,
   stripFolder,
   toPosix,
   writeFile
@@ -155,12 +156,6 @@ export function isFileList(source: Source | AssetFile[]): source is AssetFile[] 
   return Array.isArray(source) && source.every((item) => typeof item === 'object');
 }
 
-/** The one `selectedFrom` folder every file shares, as a path; `''` when they come from several. */
-export function commonSelectedFrom(files: AssetFile[]): string {
-  const folders = new Set(files.map((file) => file.selectedFrom ?? ''));
-  return folders.size === 1 ? ([...folders][0] as string) : '';
-}
-
 function cleanPattern(pattern: unknown): string {
   if (typeof pattern !== 'string' || !pattern.trim())
     throw new Error(`patterns must be non-empty strings, got ${JSON.stringify(pattern)}`);
@@ -174,7 +169,8 @@ function cleanFolderPath(folder: string): string {
 
 /** The name of the folder the files have in common: the pattern's folder, or the virtual folder they were read from. */
 function commonFolderName(files: AssetFile[]): string {
-  const folder = commonSelectedFrom(files);
+  const folders = new Set(files.map((file) => file.selectedFrom ?? ''));
+  const folder = folders.size === 1 ? ([...folders][0] as string) : '';
   if (folder) return basename(folder);
   const virtual = new Set(files.map((file) => (file.origin?.startsWith('#') ? file.origin.slice(1).split('/')[0] : '')));
   return virtual.size === 1 ? ([...virtual][0] as string) : '';
@@ -289,14 +285,6 @@ async function walkFolder(
     }
   }
   await visit(folder, origin);
-}
-
-async function statOrNull(target: string): Promise<Stats | null> {
-  try {
-    return await fs.stat(target);
-  } catch {
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------------------

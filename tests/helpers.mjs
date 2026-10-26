@@ -7,7 +7,7 @@ import { cp, mkdir, mkdtemp, readdir, readFile, rm, rmdir, stat, writeFile } fro
 import path from 'node:path';
 import { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { actions, build, destinationPath, finishAction, resolveOptions, selectFiles } from '../dist/index.js';
+import { actions, build, destinationPath, finishAction, selectFiles } from '../dist/index.js';
 
 const TESTS = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,7 +45,11 @@ export async function run(config, options = {}) {
     destination,
     /** Output files relative to the destination, sorted. */
     outputs: () => listFiles(destination),
-    exists: (relative) => stat(path.join(destination, relative)).then(() => true, () => false),
+    exists: (relative) =>
+      stat(path.join(destination, relative)).then(
+        () => true,
+        () => false
+      ),
     read: (relative) => readFile(path.join(destination, relative))
   };
 }
@@ -73,6 +77,7 @@ export async function scratchAssets() {
 /**
  * A test action that turns all its files into one group output, like an atlas does: a `.txt` listing the
  * input paths, named after the selected folder, plus a `.ref` holding the name the `.txt` gets on disk.
+ * It writes its own `process`, so the path for actions that do not use `transform` stays covered.
  */
 export const bundle = actions.register({
   name: 'bundle',
@@ -85,7 +90,16 @@ export const bundle = actions.register({
     const template = typeof destination === 'object' ? destination.filename : undefined;
     const list = { path: `${name}.txt`, data: Buffer.from(files.map((file) => file.path).join('\n')), meta: { size: 0 } };
     const ref = { path: `${name}.ref`, data: Buffer.from(destinationPath(list, template)), meta: { size: 0 } };
-    return finishAction({ action: 'bundle', source, destination, inputs: files, outputs: [list, ref], warnings, errors: [], started });
+    return finishAction({
+      action: 'bundle',
+      source,
+      destination,
+      inputs: files,
+      outputs: [list, ref],
+      warnings,
+      errors: [],
+      started
+    });
   }
 });
 
@@ -94,11 +108,7 @@ export const tag = actions.register({
   name: 'tag',
   accepts: '*',
   options: { suffix: { kind: 'string', description: 'appended before the extension', default: '-tagged' } },
-  async process({ source, destination, ...input }) {
-    const started = performance.now();
-    const options = resolveOptions(tag.options, input);
-    const { files, warnings } = await selectFiles(source);
-    const outputs = files.map((file) => ({ ...file, path: file.path.replace(/(\.[^./]+)?$/, `${options.suffix}$1`) }));
-    return finishAction({ action: 'tag', source, destination, inputs: files, outputs, warnings, errors: [], started });
+  async transform(files, { suffix }) {
+    return files.map((file) => ({ ...file, path: file.path.replace(/(\.[^./]+)?$/, `${suffix}$1`) }));
   }
 });

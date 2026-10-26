@@ -1,8 +1,8 @@
-// The registry of actions, the one way to add one, and the helpers every `process` is written with.
+// The registry of actions, the one way to add one, and what turns a `transform` into a full `process`.
 
 import { cpus } from 'node:os';
 import path from 'node:path';
-import { destinationPath, isFileList, normalizeDestination, writeFiles } from '../files.js';
+import { destinationPath, isFileList, normalizeDestination, selectFiles, writeFiles } from '../files.js';
 import type {
   ActionDefinition,
   ActionResult,
@@ -11,18 +11,21 @@ import type {
   FileResult,
   OptionDescriptor,
   OptionTable,
-  Source
+  ProcessParams,
+  RegisteredAction,
+  Source,
+  TransformResult
 } from '../types.js';
 import { join } from '../utils/fs.js';
 import { isObject, toArray } from '../utils/object.js';
 import { suggest } from '../utils/similarity.js';
 
 export type ActionRegistry = {
-  /** Adds an action, or replaces the one with the same name, and returns it. */
-  register<O extends Record<string, unknown>>(definition: ActionDefinition<O>): ActionDefinition<O>;
-} & Record<string, ActionDefinition>;
+  /** Adds an action, or replaces the one with the same name, and returns it with `process` in place. */
+  register<A extends ActionDefinition<any>>(definition: A): RegisteredAction<A>;
+} & Record<string, RegisteredAction>;
 
-const registry: Record<string, ActionDefinition> = {};
+const registry: Record<string, RegisteredAction> = {};
 
 /** Every registered action by name: the built-ins and whatever `register` added. */
 export const actions: ActionRegistry = Object.defineProperty(registry, 'register', {
@@ -30,12 +33,55 @@ export const actions: ActionRegistry = Object.defineProperty(registry, 'register
   enumerable: false
 }) as ActionRegistry;
 
-function register<O extends Record<string, unknown>>(definition: ActionDefinition<O>): ActionDefinition<O> {
-  if (!/^[a-z][\w-]*$/i.test(definition.name) || definition.name === 'register') {
-    throw new Error(`"${definition.name}" is not a valid action name`);
+// an action that wrote its own `process` keeps it; otherwise `process` is built around its `transform`
+function register<A extends ActionDefinition<any>>(definition: A): RegisteredAction<A> {
+  const { name } = definition;
+  if (!/^[a-z][\w-]*$/i.test(name) || name === 'register') throw new Error(`"${name}" is not a valid action name`);
+  const action = definition as RegisteredAction<A>;
+  if (!action.process) {
+    if (!action.transform) throw new Error(`action "${name}" needs a transform or a process function`);
+    action.process = (input) => processWithTransform(action, input);
   }
-  registry[definition.name] = definition as ActionDefinition;
-  return definition;
+  registry[name] = action as RegisteredAction;
+  return action;
+}
+
+/** The `process` every action with a `transform` gets: select, check the options, transform, write, report. */
+async function processWithTransform(
+  action: ActionDefinition,
+  { source, destination, ...input }: ProcessParams & Record<string, unknown>
+): Promise<ActionResult> {
+  const started = performance.now();
+  const options = resolveOptions(action.options, input);
+  const selection = await selectFiles(source, { accepts: action.accepts, probe: action.probe });
+  const warnings = [...selection.warnings];
+  const errors: string[] = [];
+  let outputs: AssetFile[] = [];
+  try {
+    const context = {
+      folderName: selection.folderName,
+      filenameTemplate: normalizeDestination(destination).filename as string
+    };
+    const result = await (action.transform as NonNullable<ActionDefinition['transform']>)(selection.files, options, context);
+    if (Array.isArray(result)) outputs = result;
+    else {
+      outputs = result.outputs;
+      warnings.push(...(result.warnings ?? []));
+      errors.push(...(result.errors ?? []));
+    }
+  } catch (error) {
+    errors.push((error as Error).message);
+  }
+  return finishAction({
+    action: action.name,
+    source,
+    destination,
+    inputs: selection.files,
+    outputs,
+    warnings,
+    errors,
+    started
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -161,14 +207,15 @@ function describeValue(value: unknown): string {
 const CONCURRENCY = Math.max(1, cpus().length - 1);
 
 /**
- * Runs `transform` on every file, several at a time, keeping the input order. A throw becomes an error that
- * names the file, and the file is dropped; returning null drops it silently.
+ * Runs `transformFile` on every file, several at a time, keeping the input order. A throw becomes an error that
+ * names the file, and the file is dropped; returning null drops it silently. The result can be returned from
+ * a `transform` as it is.
  */
 export async function transformFiles(
   files: AssetFile[],
-  transform: (file: AssetFile) => Promise<AssetFile | null>,
-  errors: string[]
-): Promise<AssetFile[]> {
+  transformFile: (file: AssetFile) => Promise<AssetFile | null>
+): Promise<TransformResult & { errors: string[] }> {
+  const errors: string[] = [];
   const outputs: Array<AssetFile | null> = new Array(files.length).fill(null);
   let next = 0;
   const worker = async () => {
@@ -176,17 +223,17 @@ export async function transformFiles(
       const index = next++;
       const file = files[index] as AssetFile;
       try {
-        outputs[index] = await transform(file);
+        outputs[index] = await transformFile(file);
       } catch (error) {
         errors.push(`${file.origin ?? file.path}: ${(error as Error).message}`);
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, worker));
-  return outputs.filter((output): output is AssetFile => output !== null);
+  return { outputs: outputs.filter((output): output is AssetFile => output !== null), errors };
 }
 
-/** What one `process` call did, which `finishAction` turns into its result. */
+/** What one `process` call did, which `finishAction` turns into its result. For actions that write their own `process`. */
 export interface ActionOutcome {
   action: string;
   source: Source | AssetFile[];
@@ -256,9 +303,7 @@ export async function finishAction(outcome: ActionOutcome): Promise<ActionResult
     action,
     label: actionLabel(action, source),
     selected: inputs.length,
-    ...(origins.length && memorySources.size === 1 && !memorySources.has('')
-      ? { memorySource: [...memorySources][0] }
-      : {}),
+    ...(origins.length && memorySources.size === 1 && !memorySources.has('') ? { memorySource: [...memorySources][0] } : {}),
     files: [...rows.values()],
     outputs,
     destination,

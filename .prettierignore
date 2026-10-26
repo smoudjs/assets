@@ -3,5 +3,6 @@ dist
 coverage
 package-lock.json
 sandbox/compiled
+sandbox/compiled-js
 tests/assets
 tests/.tmp

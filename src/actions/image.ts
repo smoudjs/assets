@@ -2,8 +2,7 @@
 
 import sharp, { type Metadata, type OutputInfo, type Sharp } from 'sharp';
 import type { ActionDefinition, AssetMeta, OptionTable } from '../types.js';
-import { finishAction, resolveOptions, transformFiles } from './index.js';
-import { selectFiles } from '../files.js';
+import { resolveOptions, transformFiles } from './index.js';
 import { extension } from '../utils/fs.js';
 
 type Format = 'png' | 'jpeg' | 'webp' | 'avif' | 'gif';
@@ -37,6 +36,8 @@ const POSITIONS = [
 ] as const;
 
 export interface ImageOptions extends Record<string, unknown> {
+  maxWidth?: number;
+  maxHeight?: number;
   resize?: ResizeOptions;
   trim?: boolean | { threshold?: number };
   flatten?: string;
@@ -87,6 +88,16 @@ export interface ImageAction extends ActionDefinition<ImageOptions> {
 const formatValues = { kind: 'enum', values: FORMATS, description: 'Output format' } as const;
 
 const options: OptionTable = {
+  maxWidth: {
+    kind: 'number',
+    description: 'Shrink images wider than this, keeping the aspect ratio; narrower images are untouched. Runs first',
+    min: 1
+  },
+  maxHeight: {
+    kind: 'number',
+    description: 'Shrink images taller than this, keeping the aspect ratio; shorter images are untouched. Runs first',
+    min: 1
+  },
   resize: {
     kind: 'object',
     description: 'Resize to width / height (with fit, upscale and kernel), or by scale',
@@ -220,7 +231,8 @@ export const image: ImageAction = {
   options,
 
   async readImageMeta(data) {
-    return toAssetMeta(await sharp(data).metadata());
+    const meta = await sharp(data).metadata();
+    return toAssetMeta(meta, await isTransparent(data, meta));
   },
 
   probe(data) {
@@ -230,9 +242,14 @@ export const image: ImageAction = {
   async optimizeImage(data, input = {}) {
     const options = resolveOptions<ImageOptions>(image.options, input);
     const warnings: string[] = [];
-    const meta = await sharp(data).metadata();
-    const source = normalizeFormat(meta.format);
-    const animated = options.animated && (meta.pages ?? 1) > 1;
+    const original = await sharp(data).metadata();
+    const source = normalizeFormat(original.format);
+    const animated = options.animated && (original.pages ?? 1) > 1;
+
+    // maxWidth / maxHeight shrink first, into a lossless intermediate the rest of the pipeline reads
+    const limited = exceedsLimit(original, options);
+    const pixels = limited ? await shrinkToLimit(data, options, animated) : data;
+    const meta = limited ? await sharp(pixels).metadata() : original;
 
     let candidates: Format[];
     if (options.format === undefined) {
@@ -241,20 +258,26 @@ export const image: ImageAction = {
     } else {
       candidates = Array.isArray(options.format) ? options.format : [options.format];
     }
-    if (meta.hasAlpha && !options.flatten && candidates.length > 1)
+    const transparent = await isTransparent(pixels, meta);
+    if (transparent && !options.flatten && candidates.length > 1)
       candidates = candidates.filter((format) => format !== 'jpeg');
-    if (meta.hasAlpha && !options.flatten && candidates.length === 1 && candidates[0] === 'jpeg') {
+    if (transparent && !options.flatten && candidates.length === 1 && candidates[0] === 'jpeg') {
       warnings.push('jpeg cannot hold alpha; flattened onto black (set "flatten" to choose the colour)');
     }
 
     // Pure re-encode: same format, no pixel change. Only then can the original stand in for the result.
     const pureReencode =
-      !hasResize(options) && !options.trim && !options.flatten && source !== null && !(animated && !options.animated);
+      !limited &&
+      !hasResize(options) &&
+      !options.trim &&
+      !options.flatten &&
+      source !== null &&
+      !(animated && !options.animated);
 
     let best: EncodedCandidate | undefined;
     for (const format of candidates) {
       const keepFrames = animated && ANIMATED_FORMATS.includes(format);
-      let pipeline = sharp(data, { animated: keepFrames, density: options.density }).rotate();
+      let pipeline = sharp(pixels, { animated: keepFrames, density: options.density }).rotate();
       pipeline = applyTrim(pipeline, options);
       pipeline = applyResize(pipeline, options, meta);
       if (options.flatten || format === 'jpeg') pipeline = pipeline.flatten({ background: options.flatten ?? '#000000' });
@@ -275,36 +298,29 @@ export const image: ImageAction = {
       format: best.format,
       width: best.info.width,
       height: best.kept ? (meta.height as number) : (best.info.pageHeight ?? best.info.height),
-      alpha: best.kept ? (meta.hasAlpha ?? false) : best.info.channels === 4,
+      alpha: transparent && !options.flatten && best.format !== 'jpeg',
       animated: best.kept ? animated : (best.info.pages ?? 1) > 1,
       keptOriginal: best.kept,
       warnings
     };
   },
 
-  async process({ source, destination, ...input }) {
-    const started = performance.now();
-    const options = resolveOptions<ImageOptions>(image.options, input);
-    const { files, warnings } = await selectFiles(source, { accepts: image.accepts, probe: image.readImageMeta });
-    const errors: string[] = [];
-    const outputs = await transformFiles(
-      files,
-      async (file) => {
-        const name = file.origin ?? file.path;
-        const result = await image.optimizeImage(file.data, options);
-        if (!result) {
-          warnings.push(`${name}: svg and other vector sources need a raster "format"; skipped`);
-          return null;
-        }
-        for (const warning of result.warnings) warnings.push(`${name}: ${warning}`);
-        const { data, format, width, height, alpha, animated, keptOriginal } = result;
-        const path =
-          format === formatOfExtension(file.path) ? file.path : file.path.replace(/\.[^./]+$/, '') + EXTENSIONS[format];
-        return { ...file, path, data, meta: { ...file.meta, format, width, height, alpha, animated }, keptOriginal };
-      },
-      errors
-    );
-    return finishAction({ action: image.name, source, destination, inputs: files, outputs, warnings, errors, started });
+  async transform(files, options) {
+    const warnings: string[] = [];
+    const { outputs, errors } = await transformFiles(files, async (file) => {
+      const name = file.origin ?? file.path;
+      const optimized = await image.optimizeImage(file.data, options);
+      if (!optimized) {
+        warnings.push(`${name}: svg and other vector sources need a raster "format"; skipped`);
+        return null;
+      }
+      for (const warning of optimized.warnings) warnings.push(`${name}: ${warning}`);
+      const { data, format, width, height, alpha, animated, keptOriginal } = optimized;
+      const path =
+        format === formatOfExtension(file.path) ? file.path : file.path.replace(/\.[^./]+$/, '') + EXTENSIONS[format];
+      return { ...file, path, data, meta: { ...file.meta, format, width, height, alpha, animated }, keptOriginal };
+    });
+    return { outputs, warnings, errors };
   }
 };
 
@@ -321,6 +337,25 @@ function applyTrim(pipeline: Sharp, options: ImageOptions): Sharp {
   return typeof options.trim === 'object' && options.trim.threshold !== undefined
     ? pipeline.trim({ threshold: options.trim.threshold })
     : pipeline.trim();
+}
+
+/** Whether the image, as it will be rasterized, is wider than `maxWidth` or taller than `maxHeight`. */
+function exceedsLimit(meta: Metadata, options: ImageOptions): boolean {
+  if (options.maxWidth === undefined && options.maxHeight === undefined) return false;
+  // svg is rasterized at `density`, 72 being its own size; EXIF orientations 5 to 8 swap width and height
+  const scale = meta.format === 'svg' ? options.density / 72 : 1;
+  const [width, height] = [(meta.width ?? 0) * scale, (meta.pageHeight ?? meta.height ?? 0) * scale];
+  const [shownWidth, shownHeight] = (meta.orientation ?? 1) >= 5 ? [height, width] : [width, height];
+  return shownWidth > (options.maxWidth ?? Infinity) || shownHeight > (options.maxHeight ?? Infinity);
+}
+
+// lossless webp keeps alpha and animation, so nothing is lost before the real encode
+function shrinkToLimit(data: Buffer, options: ImageOptions, animated: boolean): Promise<Buffer> {
+  return sharp(data, { animated, density: options.density })
+    .rotate()
+    .resize({ width: options.maxWidth, height: options.maxHeight, fit: 'inside', withoutEnlargement: true })
+    .webp({ lossless: true })
+    .toBuffer();
 }
 
 // `resize` is filled with its defaults even when never mentioned, so "no resize" means no dimension given.
@@ -407,12 +442,18 @@ function formatOfExtension(filePath: string): Format | null {
   return normalizeFormat(extension(filePath));
 }
 
-function toAssetMeta(meta: Metadata): Partial<AssetMeta> {
+// many tools save every png with an alpha channel; only a pixel that is not fully opaque counts as transparency
+async function isTransparent(data: Buffer, meta: Metadata): Promise<boolean> {
+  if (!meta.hasAlpha) return false;
+  return !(await sharp(data).stats()).isOpaque;
+}
+
+function toAssetMeta(meta: Metadata, transparent: boolean): Partial<AssetMeta> {
   return {
     format: normalizeFormat(meta.format) ?? meta.format,
     width: meta.width,
     height: meta.pageHeight ?? meta.height,
-    alpha: meta.hasAlpha ?? false,
+    alpha: transparent,
     animated: (meta.pages ?? 1) > 1
   };
 }

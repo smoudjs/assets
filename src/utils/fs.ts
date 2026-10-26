@@ -1,7 +1,7 @@
 // Filesystem, path and filename helpers. Every path inside the pipeline is posix-style and relative.
 
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, type Stats } from 'node:fs';
 import path from 'node:path';
 
 /** Every file under `dir` as sorted posix paths relative to `dir`; `[]` when the folder does not exist. */
@@ -69,12 +69,12 @@ export async function removeEmptyFolders(dir: string): Promise<void> {
   await visit(dir);
 }
 
-export async function exists(target: string): Promise<boolean> {
+/** The file or folder's stats, or null when nothing is there. */
+export async function statOrNull(target: string): Promise<Stats | null> {
   try {
-    await fs.access(target);
-    return true;
+    return await fs.stat(target);
   } catch {
-    return false;
+    return null;
   }
 }
 

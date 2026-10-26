@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import sharp from 'sharp';
 import { ASSETS, bundle, run, scratchAssets, tag } from './helpers.mjs';
 
 describe('core', () => {
@@ -16,7 +17,12 @@ describe('core', () => {
   });
 
   it('mirrors the source tree when destination is omitted', async () => {
-    const { outputs } = await run({ actions: [{ action: 'copy', source: 'spine' }, { action: 'copy', source: 'data/**/*.json' }] });
+    const { outputs } = await run({
+      actions: [
+        { action: 'copy', source: 'spine' },
+        { action: 'copy', source: 'data/**/*.json' }
+      ]
+    });
     assert.deepEqual(await outputs(), [
       'data/levels/level_01.json',
       'data/levels/level_02.json',
@@ -27,33 +33,22 @@ describe('core', () => {
     ]);
   });
 
-  it('#rest takes what no other action selected, and when filters by size', async () => {
-    const { result, outputs } = await run({
-      actions: [{ action: 'copy', source: 'spine' }, { action: 'copy', source: { include: '#rest', when: { size: '<20kb' } } }]
-    });
-    assert.equal(result.ok, true);
-    const files = await outputs();
-    assert.ok(files.includes('spine/hero/hero.png'));
-    assert.ok(files.includes('tiles/ground/dirt.png'));
-    assert.ok(!files.includes('images/photos/noise.png'), 'noise.png is above 20kb');
-    assert.deepEqual(result.unselected, ['images/photos/noise.png']);
-  });
-
-  it('#rest takes what the actions above left, in list order', async () => {
+  it('#rest takes what the actions above left, in list order, and when filters by size', async () => {
     const { result } = await run({
       actions: [
         { action: 'copy', source: 'tiles' },
         { action: 'copy', source: { include: '#rest', when: { size: '>20kb' } }, destination: 'big' },
         { action: 'copy', source: 'images/photos' },
-        { action: 'copy', source: '#rest' }
+        { action: 'copy', source: { include: '#rest', when: { size: '<20kb' } } }
       ]
     });
     assert.equal(result.ok, true, result.errors.join('\n'));
     const sources = (index) => result.actions[index].files.map((file) => file.source);
-    assert.deepEqual(sources(1), ['images/photos/noise.png'], 'still free when the #rest above action 3 runs');
+    assert.deepEqual(sources(1), ['images/photos/noise.png'], 'only noise.png is above 20kb, and still free here');
     assert.deepEqual(sources(2), ['images/photos/noise.png'], 'an explicit source selects whatever #rest took');
     assert.ok(!sources(3).includes('images/photos/noise.png') && !sources(3).some((s) => s.startsWith('tiles/')));
     assert.ok(sources(3).includes('data/config.xml'));
+    assert.deepEqual(result.unselected, [], 'every file was taken by some action');
   });
 
   it('a pattern without a slash matches file names at any depth', async () => {
@@ -85,7 +80,11 @@ describe('core', () => {
     const first = await run({ source: assets.dir, actions: [{ action: 'copy', source: 'data' }] });
     assert.ok((await first.outputs()).includes('data/levels/level_02.json'));
     await assets.remove('data/levels/level_02.json');
-    const second = await run({ source: assets.dir, destination: first.destination, actions: [{ action: 'copy', source: 'data' }] });
+    const second = await run({
+      source: assets.dir,
+      destination: first.destination,
+      actions: [{ action: 'copy', source: 'data' }]
+    });
     assert.deepEqual(await second.outputs(), ['data/config.xml', 'data/levels/level_01.json']);
   });
 
@@ -108,11 +107,19 @@ describe('core', () => {
     });
     assert.equal(result.ok, true, result.errors.join('\n'));
     assert.deepEqual(await outputs(), ['ground/dirt.png', 'ground/grass.png']);
-    assert.ok(result.warnings.some((w) => w.includes('#unused')), result.warnings.join('\n'));
+    assert.ok(
+      result.warnings.some((w) => w.includes('#unused')),
+      result.warnings.join('\n')
+    );
   });
 
   it('reading a virtual folder before it exists is an error', async () => {
-    const { result } = await run({ actions: [{ action: 'copy', source: '#later' }, { action: 'copy', source: 'data', destination: '#later' }] });
+    const { result } = await run({
+      actions: [
+        { action: 'copy', source: '#later' },
+        { action: 'copy', source: 'data', destination: '#later' }
+      ]
+    });
     assert.equal(result.ok, false);
     assert.match(result.errors[0], /#later/);
   });
@@ -135,7 +142,10 @@ describe('core', () => {
   it('warns when a catch-all overlaps another action', async () => {
     const { result, outputs } = await run({ actions: [tag.name, { action: 'copy', source: 'data' }] });
     assert.equal(result.ok, true, result.errors.join('\n'));
-    assert.ok(result.warnings.some((w) => w.includes('also selected') && w.includes('#rest')), result.warnings.join('\n'));
+    assert.ok(
+      result.warnings.some((w) => w.includes('also selected') && w.includes('#rest')),
+      result.warnings.join('\n')
+    );
     const files = await outputs();
     assert.ok(files.includes('data/config-tagged.xml'));
     assert.ok(files.includes('data/config.xml'));
@@ -159,7 +169,9 @@ describe('core', () => {
 
   it('applies filename templates with name, ext and hash', async () => {
     const { outputs } = await run({
-      actions: [{ action: 'copy', source: 'data/config.xml', destination: { folder: 'cfg', filename: '[name].[hash:6][ext]' } }]
+      actions: [
+        { action: 'copy', source: 'data/config.xml', destination: { folder: 'cfg', filename: '[name].[hash:6][ext]' } }
+      ]
     });
     const [output] = await outputs();
     assert.match(output, /^cfg\/config\.[0-9a-f]{6}\.xml$/);
@@ -168,7 +180,37 @@ describe('core', () => {
   it('reports unknown keys with a hint and still builds', async () => {
     const { result } = await run({ actions: [{ action: 'copy', sourse: 'data' }] });
     assert.equal(result.ok, true);
-    assert.ok(result.warnings.some((w) => w.includes('"sourse"') && w.includes('"source"')), result.warnings.join('\n'));
+    assert.ok(
+      result.warnings.some((w) => w.includes('"sourse"') && w.includes('"source"')),
+      result.warnings.join('\n')
+    );
+  });
+
+  it('without actions the built-in default preset optimizes what it can and copies the rest', async () => {
+    const { result, outputs } = await run({});
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    assert.deepEqual(result.warnings, []);
+    assert.deepEqual(result.unselected, []);
+    const files = await outputs();
+    for (const file of [
+      'images/ui/logo.png',
+      'data/levels/level_01.json',
+      'data/config.xml',
+      'images/ui/icons/check.svg',
+      'spine/hero/hero.atlas'
+    ]) {
+      assert.ok(files.includes(file), `${file} is in the output`);
+    }
+  });
+
+  it('a preset: your actions run first, its actions take the rest, and its defaults apply to yours', async () => {
+    const { result, outputs, read } = await run({ preset: 'playable', actions: [{ action: 'atlas', source: 'tiles' }] });
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    const files = await outputs();
+    assert.ok(files.includes('tiles.png') && files.includes('tiles.json'), 'your atlas ran');
+    assert.ok(!files.some((file) => file.startsWith('tiles/')), 'the preset left the tiles your atlas took');
+    assert.ok(files.includes('images/photos/noise.jpg'), 'the preset turned an opaque png into jpeg');
+    assert.equal((await sharp(await read('tiles.png')).metadata()).isPalette, true, "the preset's atlas quality applied");
   });
 
   it('refuses unsafe folder layouts', async () => {

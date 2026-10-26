@@ -14,7 +14,13 @@ async function main() {
     await json.process({ source, destination }),
     await xml.process({ source, destination }),
     await atlas.process({ source: `${source}/sprites`, destination, extrude: 1 }),
-    await atlas.process({ source: `${source}/tiles`, destination: `${destination}/atlases`, trim: false, extrude: 2, powerOfTwo: true }),
+    await atlas.process({
+      source: `${source}/tiles`,
+      destination: `${destination}/atlases`,
+      trim: false,
+      extrude: 2,
+      powerOfTwo: true
+    }),
     icons,
     await atlas.process({ source: icons.outputs, destination, padding: 4 }),
     // "#rest" exists only in a build; here the folders handled above are excluded by hand
@@ -22,9 +28,12 @@ async function main() {
       source: { include: source, exclude: [`${source}/sprites`, `${source}/tiles`, `${source}/images/ui/icons`] },
       destination
     }),
-    await copy.process({ source: { include: `${source}/spine`, exclude: ['*.json', '*.png'] }, destination: `${destination}/spine` })
+    await copy.process({
+      source: { include: `${source}/spine`, exclude: ['*.json', '*.png'] },
+      destination: `${destination}/spine`
+    })
   ];
-  console.log(formatReport(results, {verbose: true}));
+  console.log(formatReport(results, { verbose: true }));
 }
 
 await main();

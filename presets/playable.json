@@ -1,0 +1,28 @@
+{
+  "defaults": {
+    "image": { "quality": 70, "maxWidth": 2048, "maxHeight": 2048 },
+    "atlas": { "quality": 70 }
+  },
+  "actions": [
+    {
+      "action": "image",
+      "source": { "include": "*.png", "when": { "alpha": false, "size": ">400kb" } },
+      "format": "jpeg",
+      "quality": 50
+    },
+    {
+      "action": "image",
+      "source": { "include": "*.png", "when": { "alpha": false, "size": "<=400kb" } },
+      "format": "jpeg"
+    },
+    {
+      "action": "image",
+      "source": { "include": "#rest", "exclude": "*.svg", "when": { "size": ">400kb" } },
+      "quality": 50
+    },
+    { "action": "image", "source": { "include": "#rest", "exclude": "*.svg" } },
+    "json",
+    "xml",
+    { "action": "copy", "source": "#rest" }
+  ]
+}

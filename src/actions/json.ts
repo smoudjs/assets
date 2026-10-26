@@ -1,6 +1,4 @@
-import type { ActionDefinition } from '../types.js';
-import { finishAction, resolveOptions, transformFiles } from './index.js';
-import { selectFiles } from '../files.js';
+import type { ActionDefinition, AssetFile } from '../types.js';
 
 export interface JsonAction extends ActionDefinition {
   /** Parses and re-serializes JSON without spaces or line breaks. Invalid JSON throws. */
@@ -21,12 +19,17 @@ export const json: JsonAction = {
     }
   },
 
-  async process({ source, destination, ...options }) {
-    const started = performance.now();
-    resolveOptions(json.options, options);
-    const { files, warnings } = await selectFiles(source, { accepts: json.accepts });
+  // a plain loop on purpose: the simplest shape a transform can have
+  async transform(files) {
+    const outputs: AssetFile[] = [];
     const errors: string[] = [];
-    const outputs = await transformFiles(files, async (file) => ({ ...file, data: json.minifyJson(file.data) }), errors);
-    return finishAction({ action: json.name, source, destination, inputs: files, outputs, warnings, errors, started });
+    for (const file of files) {
+      try {
+        outputs.push({ ...file, data: json.minifyJson(file.data) });
+      } catch (error) {
+        errors.push(`${file.origin ?? file.path}: ${(error as Error).message}`);
+      }
+    }
+    return { outputs, errors };
   }
 };

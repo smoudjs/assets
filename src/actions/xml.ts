@@ -1,6 +1,5 @@
 import type { ActionDefinition, OptionTable } from '../types.js';
-import { finishAction, resolveOptions, transformFiles } from './index.js';
-import { selectFiles } from '../files.js';
+import { resolveOptions, transformFiles } from './index.js';
 
 export interface XmlOptions extends Record<string, unknown> {
   comments: boolean;
@@ -36,16 +35,7 @@ export const xml: XmlAction = {
     return Buffer.from(text.replace(/\u0000(\d+)\u0000/g, (_, index: string) => cdata[Number(index)] as string));
   },
 
-  async process({ source, destination, ...input }) {
-    const started = performance.now();
-    const options = resolveOptions<XmlOptions>(xml.options, input);
-    const { files, warnings } = await selectFiles(source, { accepts: xml.accepts });
-    const errors: string[] = [];
-    const outputs = await transformFiles(
-      files,
-      async (file) => ({ ...file, data: xml.minifyXml(file.data, options) }),
-      errors
-    );
-    return finishAction({ action: xml.name, source, destination, inputs: files, outputs, warnings, errors, started });
+  async transform(files, options) {
+    return transformFiles(files, async (file) => ({ ...file, data: xml.minifyXml(file.data, options) }));
   }
 };

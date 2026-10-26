@@ -21,7 +21,7 @@ Options
   --config <file>        Config file (default: assets.json)
   --source <dir>         Base source folder (default: assets)
   --destination <dir>    Base destination folder (default: assets/compiled)
-  --preset <name>        Run a preset instead of the config file
+  --preset <name>        Preset the config extends (wins over its "preset")
   --strict               Treat warnings as errors
   --verbose              List every file
   --dry-run              Process everything, write nothing
@@ -65,10 +65,10 @@ async function main(argv: string[]): Promise<number> {
   const command = positionals[0] ?? 'build';
   switch (command) {
     case 'build': {
-      const preset = values.preset as string | undefined;
       try {
         const result = await build({
-          config: preset ? { actions: [{ preset }] } : (values.config as string | undefined),
+          config: values.config as string | undefined,
+          preset: values.preset as string | undefined,
           source: values.source as string | undefined,
           destination: values.destination as string | undefined,
           dryRun: Boolean(values['dry-run']),

@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import sharp from 'sharp';
-import { atlas } from '../dist/index.js';
 import { ASSETS, run } from './helpers.mjs';
 
 const parse = (buffer) => JSON.parse(buffer.toString());
@@ -12,7 +11,8 @@ const size = async (buffer) => {
   return { width, height, format };
 };
 /** RGBA pixels of a region, so frames can be compared byte by byte. */
-const pixels = (buffer, { x, y, w, h }) => sharp(buffer).extract({ left: x, top: y, width: w, height: h }).ensureAlpha().raw().toBuffer();
+const pixels = (buffer, { x, y, w, h }) =>
+  sharp(buffer).extract({ left: x, top: y, width: w, height: h }).ensureAlpha().raw().toBuffer();
 const isPowerOfTwo = (n) => Number.isInteger(Math.log2(n));
 
 describe('atlas', () => {
@@ -42,10 +42,15 @@ describe('atlas', () => {
   });
 
   it('splits into numbered pages when sprites do not fit, links them, and warns', async () => {
-    const { result, outputs, read } = await run({ actions: [{ action: 'atlas', source: 'sprites', maxWidth: 80, maxHeight: 80 }] });
+    const { result, outputs, read } = await run({
+      actions: [{ action: 'atlas', source: 'sprites', maxWidth: 80, maxHeight: 80 }]
+    });
     assert.equal(result.ok, true, result.errors.join('\n'));
     assert.deepEqual(await outputs(), ['sprites_1.json', 'sprites_1.png', 'sprites_2.json', 'sprites_2.png']);
-    assert.ok(result.warnings.some((w) => w.includes('2 pages')), result.warnings.join('\n'));
+    assert.ok(
+      result.warnings.some((w) => w.includes('2 pages')),
+      result.warnings.join('\n')
+    );
     for (const page of [1, 2]) {
       const data = parse(await read(`sprites_${page}.json`));
       assert.equal(data.meta.image, `sprites_${page}.png`);
@@ -74,7 +79,9 @@ describe('atlas', () => {
   });
 
   it('powerOfTwo rounds pages up, name and format pick the output files', async () => {
-    const { outputs, read } = await run({ actions: [{ action: 'atlas', source: 'tiles', powerOfTwo: true, format: 'webp', name: 'world' }] });
+    const { outputs, read } = await run({
+      actions: [{ action: 'atlas', source: 'tiles', powerOfTwo: true, format: 'webp', name: 'world' }]
+    });
     assert.deepEqual(await outputs(), ['world.json', 'world.webp']);
     const { width, height, format } = await size(await read('world.webp'));
     assert.equal(format, 'webp');
@@ -111,9 +118,14 @@ describe('atlas', () => {
   });
 
   it('a sprite larger than the page fails the build and nothing is written', async () => {
-    const { result, outputs } = await run({ actions: [{ action: 'atlas', source: 'sprites', maxWidth: 40, maxHeight: 40 }] });
+    const { result, outputs } = await run({
+      actions: [{ action: 'atlas', source: 'sprites', maxWidth: 40, maxHeight: 40 }]
+    });
     assert.equal(result.ok, false);
-    assert.ok(result.errors.some((e) => e.includes('hero/idle_01.png') && e.includes('does not fit')), result.errors.join('\n'));
+    assert.ok(
+      result.errors.some((e) => e.includes('hero/idle_01.png') && e.includes('does not fit')),
+      result.errors.join('\n')
+    );
     assert.deepEqual(await outputs(), []);
   });
 
@@ -127,15 +139,5 @@ describe('atlas', () => {
     assert.equal(result.ok, true, result.errors.join('\n'));
     assert.deepEqual(await outputs(), ['icons.json', 'icons.png']);
     assert.deepEqual(Object.keys(parse(await read('icons.json')).frames), ['check', 'star']);
-  });
-});
-
-describe('atlas()', () => {
-  it('returns the page and its JSON in memory', async () => {
-    const result = await atlas.process({ source: 'tests/assets/tiles' });
-    assert.equal(result.ok, true, result.errors.join('\n'));
-    assert.deepEqual(result.outputs.map((file) => file.path).sort(), ['tiles.json', 'tiles.png']);
-    const json = result.outputs.find((file) => file.path === 'tiles.json');
-    assert.equal(parse(json.data).meta.image, 'tiles.png');
   });
 });

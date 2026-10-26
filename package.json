@@ -1,7 +1,7 @@
 {
   "name": "@smoud/assets",
-  "version": "0.0.2",
-  "description": "One config. One command. All your game assets optimized. Image optimization, conversion, resizing and texture atlases for HTML5 games and playable ads.",
+  "version": "0.0.3",
+  "description": "One config. One command. All your game assets optimized. Image optimization, conversion, resizing, texture atlases and data minification for HTML5 games and playable ads.",
   "keywords": [
     "assets",
     "asset-pipeline",
@@ -34,7 +34,6 @@
   "license": "MIT",
   "author": "Smoud",
   "type": "module",
-  "sideEffects": false,
   "exports": {
     ".": {
       "import": {
@@ -69,7 +68,6 @@
     "test": "node --test tests/",
     "sandbox": "node dist/cli.js build --config sandbox/assets.json --verbose",
     "sandbox:js": "node sandbox/assets.js",
-    "typecheck": "tsc --noEmit",
     "deploy": "npm run build && npm run test && npm publish --access public"
   },
   "dependencies": {

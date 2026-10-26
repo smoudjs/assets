@@ -10,6 +10,6 @@
     { "action": "image", "source": "images/ui/icons", "format": "png", "density": 144, "destination": "#icons" },
     { "action": "atlas", "source": "#icons", "padding": 4 },
     { "action": "image", "source": "#rest" },
-    { "source": {"include": "spine", "exclude": ["*.json", "*.png"]}, "action": "copy" }
+    { "source": { "include": "spine", "exclude": ["*.json", "*.png"] }, "action": "copy" }
   ]
 }

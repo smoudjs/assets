@@ -52,24 +52,20 @@ export interface ActionBase {
 
 export type ActionConfig = ActionBase & Record<string, unknown>;
 
-/** A preset reference inside `actions`. Scope only, never flat options. */
-export interface PresetEntry {
-  /** Built-in name, relative path, or npm package name. */
-  preset: string;
-  source?: Source;
-  destination?: Destination;
-  /** Overrides the preset's own `defaults` for this scope only. */
-  defaults?: Defaults;
-}
-
 /** A string is an action with default settings: `"image"` equals `{ "action": "image" }`. */
-export type ActionEntry = string | ActionConfig | PresetEntry;
+export type ActionEntry = string | ActionConfig;
 
 /** Option overrides per action name, e.g. `{ "image": { "quality": 80 } }`. Unknown names and options are errors. */
 export type Defaults = Record<string, Record<string, unknown>>;
 
-/** assets.json. A preset file has the same shape. */
+/** assets.json. */
 export interface AssetsConfig {
+  /**
+   * A base config yours extends: a built-in name, a path to a JSON file, or an installed package. Its `defaults`
+   * merge under yours; your actions run first and its actions take the files yours left. Omitted with no
+   * `actions`: the built-in `default` preset.
+   */
+  preset?: string;
   /** Base source folder. Always a folder. Default `assets`. */
   source?: string;
   /** Base destination folder. Always a folder. Default `assets/compiled`. */
@@ -77,7 +73,6 @@ export interface AssetsConfig {
   /** Files the build never sees. No action can select them. */
   ignore?: SourcePattern | SourcePattern[];
   defaults?: Defaults;
-  /** Omitted: the built-in `default` preset's actions. */
   actions?: ActionEntry[];
   /** Remove stale files from the destination after a successful build. Default `true`. */
   clean?: boolean;
@@ -146,10 +141,27 @@ export interface ProcessParams {
   destination?: Destination;
 }
 
+/** What `transform` gets besides the files and options. */
+export interface TransformContext {
+  /** Name of the folder the files were selected from, like `sprites`; `''` when they come from several. Names combined outputs, like an atlas. */
+  folderName: string;
+  /** The destination's filename template, like `[name].[hash][ext]`. With `destinationPath` it gives an output's final name before it is written. */
+  filenameTemplate: string;
+}
+
+/** What `transform` may return instead of a plain list, to report problems without stopping. */
+export interface TransformResult {
+  outputs: AssetFile[];
+  warnings?: string[];
+  /** Broken files. The action fails and nothing is written. */
+  errors?: string[];
+}
+
 /**
- * An action: what `actions.register` takes and what `actions.<name>` holds. `process` is the one required
- * function and has the same parameters and result for every action. Raw functions such as `packAtlas` sit
- * next to it under their own names.
+ * An action: what `actions.register` takes and what `actions.<name>` holds. You write `transform`, which
+ * turns the selected files into outputs; `register` adds `process`, which selects, checks the options,
+ * transforms, writes and reports. An action that defines `process` itself is used as is. Raw functions such
+ * as `packAtlas` sit next to them under their own names.
  */
 export interface ActionDefinition<O extends Record<string, unknown> = Record<string, unknown>> {
   /** The word users write after `"action":`. */
@@ -159,8 +171,16 @@ export interface ActionDefinition<O extends Record<string, unknown> = Record<str
   options: OptionTable;
   /** Optional: answers `when` keys other than `size`. */
   probe?: Probe;
-  process(input: ProcessParams & Partial<O>): Promise<ActionResult>;
+  /** All selected files in, all outputs out. A throw fails the action. */
+  transform?(files: AssetFile[], options: O, context: TransformContext): Promise<AssetFile[] | TransformResult>;
+  /** Source, destination and options in, the full result out. Added by `register` unless you write it. */
+  process?(input: ProcessParams & Partial<O>): Promise<ActionResult>;
 }
+
+/** An action after `actions.register`: `process` is always there. */
+export type RegisteredAction<A extends ActionDefinition<any> = ActionDefinition> = A & {
+  process(input: ProcessParams & Record<string, unknown>): Promise<ActionResult>;
+};
 
 // ---------------------------------------------------------------------------
 // Results

@@ -4,8 +4,8 @@
 
 import sharp from 'sharp';
 import type { ActionDefinition, AssetFile, OptionTable } from '../types.js';
-import { finishAction, resolveOptions } from './index.js';
-import { destinationPath, normalizeDestination, selectFiles } from '../files.js';
+import { resolveOptions } from './index.js';
+import { destinationPath } from '../files.js';
 import { contentHash } from '../utils/fs.js';
 
 type PageFormat = 'png' | 'jpeg' | 'webp' | 'avif';
@@ -141,10 +141,7 @@ export const atlas: AtlasAction = {
     return { pages: encoded, warnings, errors };
   },
 
-  async process({ source, destination, ...input }) {
-    const started = performance.now();
-    const options = resolveOptions<AtlasOptions>(atlas.options, input);
-    const { files, folderName, warnings } = await selectFiles(source, { accepts: atlas.accepts });
+  async transform(files, options, { folderName, filenameTemplate }) {
     const spriteName = (file: AssetFile) => file.path.replace(/\.[^./]+$/, '');
     const packed = await atlas.packAtlas(
       files.map((file) => ({ name: spriteName(file), data: file.data })),
@@ -152,10 +149,8 @@ export const atlas: AtlasAction = {
     );
     const fileOf = new Map(files.map((file) => [spriteName(file), file]));
     const errors = packed.errors.map(({ sprite, message }) => `${fileOf.get(sprite)?.origin ?? sprite}: ${message}`);
-    warnings.push(...packed.warnings);
 
     const name = options.name ?? (folderName || 'atlas');
-    const { filename } = normalizeDestination(destination);
     const pages = packed.pages.map((page, index) => {
       const stem = packed.pages.length > 1 ? `${name}_${index + 1}` : name;
       const image: AssetFile = {
@@ -181,9 +176,11 @@ export const atlas: AtlasAction = {
     });
     const outputs: AssetFile[] = [];
     for (const { page, image, json } of pages) {
-      const others = pages.filter((other) => other.json !== json).map((other) => destinationPath(other.json, filename));
+      const others = pages
+        .filter((other) => other.json !== json)
+        .map((other) => destinationPath(other.json, filenameTemplate));
       const meta: Record<string, unknown> = {
-        image: destinationPath(image, filename),
+        image: destinationPath(image, filenameTemplate),
         format: 'RGBA8888',
         size: { w: page.width, h: page.height },
         scale: '1'
@@ -192,7 +189,7 @@ export const atlas: AtlasAction = {
       json.data = Buffer.from(JSON.stringify({ frames: page.frames, meta }));
       outputs.push(image, json);
     }
-    return finishAction({ action: atlas.name, source, destination, inputs: files, outputs, warnings, errors, started });
+    return { outputs, warnings: packed.warnings, errors };
   }
 };
 
