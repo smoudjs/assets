@@ -291,10 +291,11 @@ If anything fails, the staging folder is deleted and the destination stays exact
 ## Command line
 
 ```sh
-npx smoud-assets build [options]
+npx smoud-assets build [options]   # build once
+npx smoud-assets watch [options]   # build, then rebuild on every change
 ```
 
-`build` is the default command, so `npx smoud-assets` works too.
+`watch` follows the source folder, the config and a preset file.
 
 | Option                | What it does                                                   |
 | --------------------- | -------------------------------------------------------------- |

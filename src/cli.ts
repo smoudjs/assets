@@ -5,6 +5,7 @@
 import { parseArgs } from 'node:util';
 import { build, formatReport, version } from './index.js';
 import { red } from './utils/colors.js';
+import { watch } from './watch.js';
 
 const HELP = `smoud-assets v${version}
 One config. One command. All your game assets optimized.
@@ -13,7 +14,7 @@ Usage
   smoud-assets <command> [options]
 
 Commands
-  build     Process assets once (default)
+  build     Process assets once
   watch     Rebuild on change
   init      Write a starter assets.json
 
@@ -57,12 +58,12 @@ async function main(argv: string[]): Promise<number> {
     process.stdout.write(`${version}\n`);
     return 0;
   }
-  if (values.help) {
+  const command = positionals[0];
+  if (values.help || command === undefined) {
     process.stdout.write(HELP);
     return 0;
   }
 
-  const command = positionals[0] ?? 'build';
   switch (command) {
     case 'build': {
       try {
@@ -83,6 +84,17 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case 'watch':
+      await watch({
+        config: values.config as string | undefined,
+        preset: values.preset as string | undefined,
+        source: values.source as string | undefined,
+        destination: values.destination as string | undefined,
+        dryRun: Boolean(values['dry-run']),
+        strict: Boolean(values.strict),
+        verbose: Boolean(values.verbose)
+      });
+      return 0;
+
     case 'init':
       process.stderr.write(`"${command}" is not implemented yet.\n`);
       return 1;

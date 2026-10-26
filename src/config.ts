@@ -238,22 +238,26 @@ function prepareActions(entries: unknown[], defaults: Defaults, fromPreset: bool
   return prepared;
 }
 
+/** The file a preset name points to when the name is a path (`./my.json`, absolute, or ending in `.json`). */
+export function presetFilePath(name: string, fromDir: string): string | undefined {
+  return name.startsWith('.') || path.isAbsolute(name) || name.endsWith('.json') ? path.resolve(fromDir, name) : undefined;
+}
+
 /** Resolution order: a path, then a built-in `presets/<name>.json` of the package, then an installed package. */
 async function loadPreset(name: string, fromDir: string): Promise<AssetsConfig> {
-  if (name.startsWith('.') || path.isAbsolute(name) || name.endsWith('.json')) {
-    return readConfigFile(path.resolve(fromDir, name));
-  }
+  const file = presetFilePath(name, fromDir);
+  if (file) return readConfigFile(file);
   if (/^[\w-]+$/.test(name)) {
     const builtIn = fileURLToPath(new URL(`../presets/${name}.json`, import.meta.url));
     if (await statOrNull(builtIn)) return readConfigFile(builtIn);
   }
-  let file: string;
+  let packageFile: string;
   try {
-    file = createRequire(path.join(fromDir, 'noop.js')).resolve(name);
+    packageFile = createRequire(path.join(fromDir, 'noop.js')).resolve(name);
   } catch {
     throw new Error(`unknown preset "${name}"`);
   }
-  return readConfigFile(file);
+  return readConfigFile(packageFile);
 }
 
 function lookupAction(name: string): RegisteredAction | undefined {
