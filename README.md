@@ -6,7 +6,7 @@
 
 **One config. One command. All your game assets optimized.**
 
-`@smoud/assets` turns a folder of source assets into an optimized output folder. Images are resized, converted and compressed, sprites are packed into texture atlases, sounds are converted and compressed, data files are minified, and everything else is copied. It is built for HTML5 games, WebGL and playable ads. The output is plain files that PixiJS, Phaser, Three.js, Cocos or your own loader can read.
+`@smoud/assets` turns a folder of source assets into an optimized output folder. Images are resized, converted and compressed, sprites are packed into texture atlases, sounds are converted and compressed, or joined into audio sprites, 3D models are optimized and compressed, data files are minified, and everything else is copied. It is built for HTML5 games, WebGL and playable ads. The output is plain files that PixiJS, Phaser, Three.js, Cocos or your own loader can read.
 
 Use it two ways:
 
@@ -20,7 +20,7 @@ Use it two ways:
 - [The config file](#the-config-file)
   - [Presets](#presets)
 - [Command line](#command-line)
-- [Action reference](#action-reference): image, atlas, audio, audiosprite, gltf, json, xml, copy
+- [Action reference](#action-reference): image, atlas, audio, audiosprite, gltf, meshopt, json, xml, copy
 - [JavaScript API](#javascript-api)
   - [Your own actions](#your-own-actions)
 
@@ -30,9 +30,9 @@ Use it two ways:
 - 🧩 **Texture atlases**: MaxRects packing, trimming, extrusion, several pages, TexturePacker-compatible JSON.
 - 🔊 **Audio**: convert to mp3, ogg, opus or m4a, downmix to mono, resample, set the bitrate. Never raises the quality of a source.
 - 🎚️ **Audio sprites**: many sounds in one file, with a JSON for Howler, Phaser, PixiJS Sound or your own loader.
-- 🧊 **3D models**: clean up, simplify and quantize glTF and GLB, strip normals or materials, extract textures. No decoder needed.
+- 🧊 **3D models**: clean up, simplify and quantize glTF and GLB, strip normals or materials, extract textures, meshopt compression.
 - 📄 **Data files**: JSON and XML minified.
-- 🎯 **Explicit selection**: folders, globs, `#rest`, filters on size and image facts.
+- 🎯 **Explicit selection**: folders, globs, `#rest`, filters on size, image, sound and model facts.
 - 🔗 **Chaining**: virtual `#folders` pass results from one action to the next, for example rasterize svg icons, then pack them.
 - 🛡️ **Safe builds**: a failed build leaves the previous output untouched.
 - 🧰 **Toolkit**: every action and its raw function is available from code, and you can register your own.
@@ -131,12 +131,12 @@ Each entry in `actions` is one step: which files, what to do, where to put the r
 { "action": "image", "source": "ui", "destination": "interface", "format": "webp", "quality": 80 }
 ```
 
-| Key           | What it does                                                                                                     |
-| ------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `json`, `xml`, `copy`, or one you registered. |
-| `source`      | Which files. Omitted: every file the action can handle.                                                          |
-| `destination` | Where the results go. Omitted: each result lands where its source was.                                           |
-| anything else | Options of the action, see [Action reference](#action-reference).                                                |
+| Key           | What it does                                                                                                                |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `meshopt`, `json`, `xml`, `copy`, or one you registered. |
+| `source`      | Which files. Omitted: every file the action can handle.                                                                     |
+| `destination` | Where the results go. Omitted: each result lands where its source was.                                                      |
+| anything else | Options of the action, see [Action reference](#action-reference).                                                           |
 
 A plain string is an action with default settings: `"image"` equals `{ "action": "image" }`.
 
@@ -173,7 +173,7 @@ An action only takes files it can handle. `image` never selects a `.json`, and `
 }
 ```
 
-**`when`** filters on facts about a file. `size` is known for every file. Other facts come from the action that selects: `image` knows `width`, `height`, `alpha` and `animated`, `audio` knows `duration`, `channels`, `sampleRate` and `bitrate`, and `gltf` knows `triangles`, `vertices`, `textures` and `animations`.
+**`when`** filters on facts about a file. `size` is known for every file. Other facts come from the action that selects: `image` knows `width`, `height`, `alpha` and `animated`, `audio` knows `duration`, `channels`, `sampleRate` and `bitrate`, and `gltf` and `meshopt` know `triangles`, `vertices`, `textures` and `animations`.
 
 | Fact         | Example                         | Meaning                                |
 | ------------ | ------------------------------- | -------------------------------------- |
@@ -541,6 +541,32 @@ Good to know:
 - A `.gltf` brings its `.bin` and textures, and no later action takes them. Put `gltf` before your image actions.
 - Cleanup always runs: unused and duplicate parts go and vertices are welded. It never changes how a model looks.
 - Extracted textures fit an atlas only when they do not repeat; the game maps the UVs onto the frame.
+- Reads meshopt-compressed models too, and always writes them uncompressed. For compression, see [meshopt](#meshopt).
+
+### meshopt
+
+Compresses glTF models, `.glb` and `.gltf`, with `EXT_meshopt_compression`. The game needs meshoptimizer's decoder to load them.
+
+```json
+{ "action": "gltf", "source": "models", "destination": "#models" },
+{ "action": "meshopt", "source": "#models", "destination": "models" }
+```
+
+| Option  | What it does                                                        | Default |
+| ------- | ------------------------------------------------------------------- | ------- |
+| `level` | `medium`, or `high`, which also packs normals and tangents tighter. | `high`  |
+
+In three.js:
+
+```js
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const loader = new GLTFLoader();
+loader.setMeshoptDecoder(MeshoptDecoder);
+```
+
+Works on any glTF model. Run `gltf` before it to also clean up, simplify or re-encode textures, as in the example above.
 
 ### json
 
@@ -568,6 +594,7 @@ import {
   audio,
   audiosprite,
   gltf,
+  meshopt,
   json,
   xml,
   copy,
@@ -633,7 +660,8 @@ const sprite = await audiosprite.packAudioSprite(
   ],
   { gap: 0.5 }
 );
-const model = await gltf.optimizeGltf({ name: 'crate', data: glbBuffer }, { simplify: { ratio: 0.5 } });
+const model = await gltf.optimizeGltf({ data: glbBuffer }, { simplify: { ratio: 0.5 } });
+const compressed = await meshopt.compressGltf({ data: model.data });
 const small = json.minifyJson(jsonBuffer);
 const tight = xml.minifyXml(xmlBuffer, { comments: false });
 ```
@@ -646,8 +674,9 @@ const tight = xml.minifyXml(xmlBuffer, { comments: false });
 | `audio.readAudioMeta(data)`                    | `{ format, duration, channels, sampleRate, bitrate }`                                                                                           |
 | `atlas.packAtlas(sprites, options)`            | `{ pages, warnings, errors }`. Each page is `{ image, width, height, frames }`. `errors` lists sprites that were left out.                      |
 | `audiosprite.packAudioSprite(sounds, options)` | `{ data, format, duration, channels, sampleRate, bitrate, sounds }`. Each sound is `{ name, start, duration }`, in ms.                          |
-| `gltf.optimizeGltf(model, options)`            | `{ data, format, files, triangles, vertices, textures, animations }`. `files` are the `.bin` and textures written next to the model.            |
+| `gltf.optimizeGltf(model, options)`            | `{ data, format, files, triangles, vertices, textures, animations }`. `files` are the `.bin` and textures the model refers to, by name.         |
 | `gltf.readGltfMeta(data)`                      | `{ format, triangles, vertices, textures, animations }`                                                                                         |
+| `meshopt.compressGltf(model, options)`         | As `gltf.optimizeGltf`, with the model compressed.                                                                                              |
 | `json.minifyJson(data)`                        | A buffer. Throws on invalid JSON.                                                                                                               |
 | `xml.minifyXml(data, options)`                 | A buffer.                                                                                                                                       |
 

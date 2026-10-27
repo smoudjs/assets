@@ -35,6 +35,8 @@
       "destination": { "folder": "models/lods", "filename": "[name]_lod1" },
       "simplify": { "ratio": 0.25 }
     },
+    { "action": "gltf", "source": "models/crate.glb", "destination": "#compressed" },
+    { "action": "meshopt", "source": "#compressed", "destination": "models/compressed" },
     { "action": "image", "source": "#rest" },
     { "source": { "include": "spine", "exclude": ["*.json", "*.png"] }, "action": "copy" }
   ]

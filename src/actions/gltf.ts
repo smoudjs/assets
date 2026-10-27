@@ -5,14 +5,14 @@
 import { promises as fs } from 'node:fs';
 import type { Document } from '@gltf-transform/core';
 import { destinationPath } from '../files.js';
-import type { ActionDefinition, AssetFile, AssetMeta, OptionTable } from '../types.js';
+import type { ActionDefinition, AssetFile, AssetMeta, OptionTable, TransformResult } from '../types.js';
 import { basename, dirname, extension, join } from '../utils/fs.js';
 import { image } from './image.js';
 import { resolveOptions, transformFiles } from './index.js';
 
-type Form = 'glb' | 'gltf' | 'gltf-embedded';
+type GltfFormat = 'glb' | 'gltf' | 'gltf-embedded';
 type TextureFormat = 'png' | 'jpeg' | 'webp' | 'avif';
-const FORMS: Form[] = ['glb', 'gltf', 'gltf-embedded'];
+const FORMATS: GltfFormat[] = ['glb', 'gltf', 'gltf-embedded'];
 const MIME_TYPES: Record<TextureFormat, string> = {
   png: 'image/png',
   jpeg: 'image/jpeg',
@@ -29,7 +29,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 const GLB_MAGIC = 0x46546c67;
 
 export interface GltfOptions extends Record<string, unknown> {
-  format?: Form;
+  format?: GltfFormat;
   quantize: boolean;
   simplify: { ratio?: number; error: number; method: 'collapse' | 'sloppy' };
   textures: { format?: TextureFormat; quality?: number; maxSize?: number; extract: boolean };
@@ -43,17 +43,17 @@ export interface GltfOptions extends Record<string, unknown> {
 
 /** A model going into `optimizeGltf`. */
 export interface GltfInput {
-  /** Base name of the files written next to the model, like `crate` for `crate.bin`. */
-  name: string;
+  /** Base name of the returned files, like `crate` for `crate.bin`. Default: `model`. */
+  name?: string;
   /** A `.glb`, or the JSON of a `.gltf`. */
   data: Buffer;
   /** The files a `.gltf` refers to, by the path written in it, like `{ "crate.bin": buffer }`. */
   companions?: Record<string, Buffer>;
-  /** The name the model refers to a file next to it by, from its plain name and bytes. Default: the plain name. */
+  /** The name the model refers to a returned file by, from its plain name and bytes. Default: the plain name. */
   fileName?: (plainName: string, data: Buffer) => string;
 }
 
-/** A file written next to the model: a `.bin` or texture of the `gltf` form, or an extracted texture. */
+/** A file returned with the model: a `.bin` or texture of the `gltf` format, or an extracted texture. */
 export interface GltfFile {
   /** Plain name, like `crate.bin` or `crate_wood_baseColor.png`. */
   name: string;
@@ -64,7 +64,7 @@ export interface GltfFile {
 export interface OptimizedGltf {
   /** A `.glb`, or the JSON of a `.gltf`. */
   data: Buffer;
-  format: Form;
+  format: GltfFormat;
   files: GltfFile[];
   triangles: number;
   vertices: number;
@@ -73,7 +73,7 @@ export interface OptimizedGltf {
 }
 
 export interface GltfAction extends ActionDefinition<GltfOptions> {
-  /** Form, triangles, vertices, textures and animations of a model, read from its JSON alone. Also the probe for `when`. */
+  /** Format, triangles, vertices, textures and animations of a model, read from its JSON alone. Also the probe for `when`. */
   readGltfMeta(input: Buffer | string): Promise<Partial<AssetMeta>>;
   /**
    * Optimize one model. With `extract`, its textures come back as files and the model holds none, like Blender's
@@ -88,7 +88,7 @@ const keep = (what: string) =>
 const options: OptionTable = {
   format: {
     kind: 'enum',
-    values: FORMS,
+    values: FORMATS,
     description: 'glb, gltf with separate files, or gltf with everything inside. Omitted: as the source'
   },
   quantize: {
@@ -178,7 +178,7 @@ export const gltf: GltfAction = {
       }
     }
     return {
-      format: formOf(data),
+      format: detectFormat(data),
       triangles,
       vertices,
       textures: json.textures?.length ?? 0,
@@ -194,13 +194,20 @@ export const gltf: GltfAction = {
   async optimizeGltf(model, input = {}) {
     const options = resolveOptions<GltfOptions>(gltf.options, input);
     const tools = await loadGltfTransform();
-    const sourceForm = formOf(model.data);
-    const form = options.format ?? sourceForm;
-    const doc = await readDocument(tools, model, sourceForm);
+    const sourceFormat = detectFormat(model.data);
+    const format = options.format ?? sourceFormat;
+    const doc = await readDocument(tools, model, sourceFormat);
     const { functions } = tools;
 
+    // a meshopt-compressed model was decoded on reading; dropping the extension writes it uncompressed
+    const compression = doc
+      .getRoot()
+      .listExtensionsUsed()
+      .find((extension) => extension.extensionName === 'EXT_meshopt_compression');
+    if (compression) compression.dispose();
+
     removeData(doc, options);
-    const extracted = await processTextures(doc, model.name, options, tools);
+    const extracted = await processTextures(doc, model.name ?? 'model', options, tools);
     // extracted textures leave their UVs behind on purpose: the game puts the textures back
     await doc.transform(functions.prune({ keepAttributes: options.textures.extract }), functions.dedup(), functions.weld());
     if (options.simplify.ratio !== undefined)
@@ -208,11 +215,11 @@ export const gltf: GltfAction = {
     if (options.quantize) await doc.transform(functions.quantize());
     await doc.transform(functions.unpartition());
 
-    const written = await writeDocument(doc, form, model, tools);
+    const written = await writeDocument(doc, format, model, tools);
     const meta = await gltf.readGltfMeta(written.data);
     return {
       data: written.data,
-      format: form,
+      format,
       files: [...written.files, ...extracted],
       triangles: meta.triangles as number,
       vertices: meta.vertices as number,
@@ -221,52 +228,58 @@ export const gltf: GltfAction = {
     };
   },
 
-  async transform(files, options, { filenameTemplate }) {
-    // transformFiles keeps one output per input, so the files next to each model wait here and follow it
-    const nextToModel = new Map<AssetFile, AssetFile[]>();
-    const { outputs, errors } = await transformFiles(files, async (file) => {
-      const name = basename(file.path).replace(/\.[^.]+$/, '');
-      const folder = dirname(file.path);
-      const optimized = await gltf.optimizeGltf(
-        {
-          name,
-          data: file.data,
-          companions: Object.fromEntries((file.companions ?? []).map((companion) => [companion.path, companion.data])),
-          // the model refers to each file by the name the filename template gives it, as an atlas JSON does
-          fileName: (plainName, data) =>
-            basename(destinationPath({ path: plainName, data, meta: { size: 0 } }, filenameTemplate))
-        },
-        options
-      );
-      const { data, format, triangles, vertices, textures, animations } = optimized;
-      const modelFile: AssetFile = {
-        ...file,
-        companions: undefined,
-        path: join(folder, `${name}${format === 'glb' ? '.glb' : '.gltf'}`),
-        data,
-        meta: { ...file.meta, format, triangles, vertices, textures, animations }
-      };
-      nextToModel.set(
-        modelFile,
-        optimized.files.map((extra) => ({
-          ...file,
-          companions: undefined,
-          path: join(folder, extra.name),
-          data: extra.data,
-          meta: { size: 0 }
-        }))
-      );
-      return modelFile;
-    });
-    return { outputs: outputs.flatMap((model) => [model, ...(nextToModel.get(model) ?? [])]), errors };
+  transform(files, options, { filenameTemplate }) {
+    return transformModels(files, filenameTemplate, (model) => gltf.optimizeGltf(model, options));
   }
 };
 
-type GltfTransform = Awaited<ReturnType<typeof importGltfTransform>>;
+/** Runs `process` on each model file; every model comes out followed by the files written next to it. */
+export async function transformModels(
+  files: AssetFile[],
+  filenameTemplate: string,
+  process: (model: GltfInput) => Promise<OptimizedGltf>
+): Promise<TransformResult> {
+  // transformFiles keeps one output per input, so the files next to each model wait here and follow it
+  const nextToModel = new Map<AssetFile, AssetFile[]>();
+  const { outputs, errors } = await transformFiles(files, async (file) => {
+    const name = basename(file.path).replace(/\.[^.]+$/, '');
+    const folder = dirname(file.path);
+    const optimized = await process({
+      name,
+      data: file.data,
+      companions: Object.fromEntries((file.companions ?? []).map((companion) => [companion.path, companion.data])),
+      // the model refers to each file by the name the filename template gives it, as an atlas JSON does
+      fileName: (plainName, data) =>
+        basename(destinationPath({ path: plainName, data, meta: { size: 0 } }, filenameTemplate))
+    });
+    const { data, format, triangles, vertices, textures, animations } = optimized;
+    const modelFile: AssetFile = {
+      ...file,
+      companions: undefined,
+      path: join(folder, `${name}${format === 'glb' ? '.glb' : '.gltf'}`),
+      data,
+      meta: { ...file.meta, format, triangles, vertices, textures, animations }
+    };
+    nextToModel.set(
+      modelFile,
+      optimized.files.map((extra) => ({
+        ...file,
+        companions: undefined,
+        path: join(folder, extra.name),
+        data: extra.data,
+        meta: { size: 0 }
+      }))
+    );
+    return modelFile;
+  });
+  return { outputs: outputs.flatMap((model) => [model, ...(nextToModel.get(model) ?? [])]), errors };
+}
+
+export type GltfTransform = Awaited<ReturnType<typeof importGltfTransform>>;
 
 let loading: Promise<GltfTransform> | undefined;
 
-function loadGltfTransform(): Promise<GltfTransform> {
+export function loadGltfTransform(): Promise<GltfTransform> {
   loading ??= importGltfTransform();
   return loading;
 }
@@ -278,12 +291,15 @@ async function importGltfTransform() {
     import('@gltf-transform/functions'),
     import('meshoptimizer')
   ]);
-  await meshoptimizer.MeshoptSimplifier.ready;
-  // glTF Transform logs every step to the console; the build report says what happened instead
+  const { MeshoptSimplifier, MeshoptEncoder, MeshoptDecoder } = meshoptimizer;
+  await Promise.all([MeshoptSimplifier.ready, MeshoptEncoder.ready, MeshoptDecoder.ready]);
+  // glTF Transform logs every step to the console; the build report says what happened instead.
+  // The decoder and encoder run only for models using EXT_meshopt_compression
   const io = new core.NodeIO()
     .registerExtensions(extensions.ALL_EXTENSIONS)
+    .registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder })
     .setLogger(new core.Logger(core.Logger.Verbosity.SILENT));
-  return { core, extensions, functions, simplifier: meshoptimizer.MeshoptSimplifier, io };
+  return { core, extensions, functions, simplifier: MeshoptSimplifier, encoder: MeshoptEncoder, io };
 }
 
 /** The parts of the glTF JSON this file reads. */
@@ -321,7 +337,7 @@ async function readModelHead(file: string): Promise<Buffer> {
   return head ?? fs.readFile(file);
 }
 
-function formOf(data: Buffer): Form {
+export function detectFormat(data: Buffer): GltfFormat {
   if (data.length >= 4 && data.readUInt32LE(0) === GLB_MAGIC) return 'glb';
   return externalUris(readJson(data)).length ? 'gltf' : 'gltf-embedded';
 }
@@ -335,8 +351,8 @@ function externalUris(json: GltfJson): string[] {
 
 const isWebUrl = (uri: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(uri);
 
-async function readDocument({ io }: GltfTransform, model: GltfInput, form: Form): Promise<Document> {
-  if (form === 'glb') return io.readBinary(new Uint8Array(model.data));
+export async function readDocument({ io }: GltfTransform, model: GltfInput, format: GltfFormat): Promise<Document> {
+  if (format === 'glb') return io.readBinary(new Uint8Array(model.data));
   const json = readJson(model.data);
   const resources: Record<string, Uint8Array<ArrayBuffer>> = {};
   for (const uri of externalUris(json)) {
@@ -459,16 +475,15 @@ async function simplify(doc: Document, options: Required<GltfOptions['simplify']
   }
 }
 
-async function writeDocument(doc: Document, form: Form, model: GltfInput, tools: GltfTransform) {
+export async function writeDocument(doc: Document, format: GltfFormat, model: GltfInput, tools: GltfTransform) {
   const { io, core } = tools;
-  if (form === 'glb') return { data: Buffer.from(await io.writeBinary(doc)), files: [] as GltfFile[] };
+  if (format === 'glb') return { data: Buffer.from(await io.writeBinary(doc)), files: [] as GltfFile[] };
 
   const root = doc.getRoot();
+  const name = model.name ?? 'model';
   const names = new Set<string>();
-  root
-    .listBuffers()
-    .forEach((buffer, index) => buffer.setURI(index ? `${model.name}_${index + 1}.bin` : `${model.name}.bin`));
-  for (const texture of root.listTextures()) texture.setURI(uniqueName(textureFileName(model.name, texture, tools), names));
+  root.listBuffers().forEach((buffer, index) => buffer.setURI(index ? `${name}_${index + 1}.bin` : `${name}.bin`));
+  for (const texture of root.listTextures()) texture.setURI(uniqueName(textureFileName(name, texture, tools), names));
   const { json, resources } = await io.writeJSON(doc, { format: core.Format.GLTF });
 
   const files: GltfFile[] = [];
@@ -477,7 +492,7 @@ async function writeDocument(doc: Document, form: Form, model: GltfInput, tools:
     const bytes = item.uri === undefined ? undefined : resources[item.uri];
     if (!item.uri || !bytes) continue;
     const data = Buffer.from(bytes);
-    if (form === 'gltf-embedded') {
+    if (format === 'gltf-embedded') {
       item.uri = `data:${item.mimeType ?? 'application/octet-stream'};base64,${data.toString('base64')}`;
       continue;
     }

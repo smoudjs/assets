@@ -150,6 +150,17 @@ describe('gltf: when, cache and failures', () => {
     }
   });
 
+  it('reads a meshopt-compressed model and writes it uncompressed', async () => {
+    const compressed = await run({ actions: [{ action: 'meshopt', source: 'models/sphere.glb' }] });
+    const { result, read } = await run({
+      source: compressed.destination,
+      actions: [{ action: 'gltf', source: 'models' }]
+    });
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    assert.deepEqual(modelJson(await read('models/sphere.glb')).extensionsUsed, ['KHR_mesh_quantization']);
+    assert.equal(result.actions[0].outputs[0].meta.triangles, 1152);
+  });
+
   it('when.triangles uses the probe', async () => {
     const { result } = await run({
       actions: [{ action: 'gltf', source: { include: 'models', when: { triangles: '>100' } } }]

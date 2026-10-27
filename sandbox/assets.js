@@ -1,7 +1,7 @@
 // The sandbox as JavaScript: the same actions as assets.json, called one by one through the public API.
 // Run: npm run sandbox:js
 
-import { atlas, audio, audiosprite, copy, formatReport, gltf, image, json, xml } from '../dist/index.js';
+import { atlas, audio, audiosprite, copy, formatReport, gltf, image, json, meshopt, xml } from '../dist/index.js';
 
 const source = 'tests/assets';
 const destination = 'sandbox/compiled-js';
@@ -55,6 +55,10 @@ async function main() {
       source: `${source}/models/sphere.glb`,
       destination: { folder: `${destination}/models/lods`, filename: '[name]_lod1' },
       simplify: { ratio: 0.25 }
+    }),
+    await meshopt.process({
+      source: (await gltf.process({ source: `${source}/models/crate.glb` })).outputs,
+      destination: `${destination}/models/compressed`
     }),
     // "#rest" exists only in a build; here the folders handled above are excluded by hand. The crate's texture
     // belongs to its .gltf, so models are left out too
