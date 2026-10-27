@@ -8,7 +8,7 @@ import path from 'node:path';
 import { parseVirtualFolder } from './actions/index.js';
 import { loadConfig, prepareConfig, type PreparedAction, type PreparedConfig } from './config.js';
 import { destinationPath, listSourceFiles, selectFiles } from './files.js';
-import type { ActionResult, AssetFile, AssetsConfig, BuildResult, FileResult } from './types.js';
+import type { ActionResult, AssetFile, AssetsConfig, BuildResult, FileResult, ProgressEvent } from './types.js';
 import {
   isPathUnderFolder,
   join,
@@ -36,8 +36,10 @@ export interface BuildOptions {
   dryRun?: boolean;
   /** Warnings count as failure. */
   strict?: boolean;
-  /** Reuse cached results for unchanged files, over the config's `cache`. Default `false`. */
+  /** Reuse cached results for unchanged files, over the config's `cache`. Default `true`. */
   cache?: boolean;
+  /** Called as each action moves through its files. */
+  onProgress?: (event: ProgressEvent) => void;
 }
 
 /** Everything one build run keeps track of while its actions run. */
@@ -45,6 +47,7 @@ interface BuildState {
   config: PreparedConfig;
   staging: string;
   cache: boolean;
+  onProgress?: (event: ProgressEvent) => void;
   /** The config's ignore patterns plus the destination when it sits inside the source. */
   ignore: string[];
   result: BuildResult;
@@ -85,7 +88,8 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
   const state: BuildState = {
     config,
     staging,
-    cache: options.cache ?? config.cache ?? false,
+    cache: options.cache ?? config.cache ?? true,
+    onProgress: options.onProgress,
     ignore,
     result,
     taken: new Set(),
@@ -160,13 +164,19 @@ async function runAction(action: PreparedAction, files: AssetFile[], state: Buil
 
   // the action runs in memory; only the filename template goes along, so an atlas can predict its page names.
   // `cache` goes only to actions that set it: an action with its own `process` would take it for an unknown option
+  // the action reports as if it ran alone; its place in the build is filled in here. The first event comes from
+  // here too, so an action with its own `process` that never reports still shows up
+  const position = { label: action.label, index: action.index, actions: state.config.actions.length };
+  const onProgress = state.onProgress && ((event: ProgressEvent) => state.onProgress?.({ ...event, ...position }));
+  onProgress?.({ ...position, done: 0, total: files.length });
   let result: ActionResult;
   try {
     result = await action.action.process({
       ...action.options,
       source: files,
       destination: { filename: target.filename },
-      ...(state.cache && action.action.cache ? { cache: true } : {})
+      ...(state.cache && action.action.cache ? { cache: true } : {}),
+      ...(onProgress ? { onProgress } : {})
     });
   } catch (error) {
     state.result.errors.push(`${where}: ${(error as Error).message}`);

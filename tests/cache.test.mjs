@@ -48,13 +48,15 @@ describe('cache', () => {
     }
   });
 
-  it('is off unless asked for', async () => {
+  it('is on by default; the config turns it off and the option wins over the config', async () => {
     const assets = await scratchAssets();
-    await run(config(assets.dir), { cache: true });
-    const plain = await run(config(assets.dir));
-    assert.deepEqual(Object.values(cachedCount(plain.result)), [0, 0]);
-    const fromConfig = await run({ ...config(assets.dir), cache: true });
-    assert.ok(fromConfig.result.actions.every((action) => action.fromCache === action.selected));
+    await run(config(assets.dir));
+    const byDefault = await run(config(assets.dir));
+    assert.ok(byDefault.result.actions.every((action) => action.fromCache === action.selected));
+    const off = await run({ ...config(assets.dir), cache: false });
+    assert.deepEqual(Object.values(cachedCount(off.result)), [0, 0]);
+    const optionWins = await run({ ...config(assets.dir), cache: false }, { cache: true });
+    assert.ok(optionWins.result.actions.every((action) => action.fromCache === action.selected));
   });
 
   it('a changed image is processed alone; a changed sprite repacks its whole atlas', async () => {

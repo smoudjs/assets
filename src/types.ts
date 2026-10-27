@@ -68,7 +68,7 @@ export interface AssetsConfig {
   preset?: string;
   /** Base source folder. Always a folder. Default `assets`. */
   source?: string;
-  /** Base destination folder. Always a folder. Default `assets/compiled`. */
+  /** Base destination folder. Always a folder. Default `assets/optimized`. */
   destination?: string;
   /** Files the build never sees. No action can select them. */
   ignore?: SourcePattern | SourcePattern[];
@@ -76,7 +76,7 @@ export interface AssetsConfig {
   actions?: ActionEntry[];
   /** Remove stale files from the destination after a successful build. Default `true`. */
   clean?: boolean;
-  /** Reuse results from `node_modules/.cache/smoud-assets` for unchanged files. Default `false` for build, `true` for watch. */
+  /** Reuse results from `node_modules/.cache/smoud-assets` for unchanged files. Default `true`. */
   cache?: boolean;
 }
 
@@ -143,6 +143,22 @@ export interface ProcessParams {
   destination?: Destination;
   /** Reuse cached results for unchanged files. Only for actions that set `cache`. Default `false`. */
   cache?: boolean;
+  /** Called as the action moves through its files. */
+  onProgress?: (event: ProgressEvent) => void;
+}
+
+/** Where a running action is: what `onProgress` receives. */
+export interface ProgressEvent {
+  /** e.g. `image, source "ui"` */
+  label: string;
+  /** 1-based position of the action in the build, and how many actions the build runs; 1 and 1 for a single `process`. */
+  index: number;
+  actions: number;
+  /** Files finished, of all the action's files. Actions that take their files together jump from 0 to `total`. */
+  done: number;
+  total: number;
+  /** The file that just started, for actions that go file by file. */
+  file?: string;
 }
 
 /** What `transform` gets besides the files and options. */

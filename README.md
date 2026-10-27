@@ -76,10 +76,10 @@ Run the build:
 npx smoud-assets build
 ```
 
-The result is in `assets/compiled/`:
+The result is in `assets/optimized/`:
 
 ```
-assets/compiled/
+assets/optimized/
 ├─ sprites.png
 ├─ sprites.json
 ├─ ui/logo.webp
@@ -95,7 +95,7 @@ assets/compiled/
 {
   "preset": "playable",
   "source": "assets",
-  "destination": "assets/compiled",
+  "destination": "assets/optimized",
   "ignore": ["**/*.psd", "raw"],
   "defaults": {
     "image": { "quality": 80 }
@@ -111,12 +111,12 @@ assets/compiled/
 | ------------- | --------------------------------------------------------------------------------- | ------------------------------------- |
 | `preset`      | A base config yours extends, see [Presets](#presets).                             | `default` when there are no `actions` |
 | `source`      | Folder with your source assets.                                                   | `assets`                              |
-| `destination` | Output folder. Must not be the source folder, contain it, or be the project root. | `assets/compiled`                     |
+| `destination` | Output folder. Must not be the source folder, contain it, or be the project root. | `assets/optimized`                    |
 | `ignore`      | Files the build never sees. Dot files and `node_modules` are always ignored.      | none                                  |
 | `defaults`    | Starting options per action, see [Defaults](#defaults).                           | none                                  |
 | `actions`     | The list of actions, run top to bottom.                                           | none                                  |
 | `clean`       | Remove files from the destination that this build did not produce.                | `true`                                |
-| `cache`       | Reuse earlier results for unchanged files.                                        | `false`, `true` for `watch`           |
+| `cache`       | Reuse earlier results for unchanged files.                                        | `true`                                |
 
 `source` and `destination` are always folders, never patterns. The command line flags `--source` and `--destination` override them.
 
@@ -280,7 +280,7 @@ The rules:
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `default`      | Compresses images in their own format, minifies json and xml, copies everything else, svg included.                                                                                            |
 | `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases default to quality 70. Then json, xml and copy like `default`. |
-| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 400 KB. Atlas pages default to webp at quality 60.                                        |
+| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas pages default to webp at quality 60.                                        |
 
 ### How a build runs
 
@@ -310,7 +310,7 @@ npx smoud-assets init [options]    # write a starter assets.json
 | `--strict`            | Warnings count as failure.                                     |
 | `--verbose`           | One line per file, and every warning instead of the first ten. |
 | `--dry-run`           | Process everything, write nothing.                             |
-| `--[no-]cache`        | Use the cache. Off for `build`, on for `watch`.                |
+| `--[no-]cache`        | Use the cache or not. Wins over the config.                    |
 | `-h, --help`          | Show help.                                                     |
 | `-v, --version`       | Show the version.                                              |
 
@@ -454,6 +454,7 @@ await atlas.process({ source: 'assets/sprites', destination: 'public', extrude: 
 - **`source`** is a folder, file, glob or long-form object, relative to the working directory. Absolute paths work too. It can also be a list of files you already have in memory.
 - **`destination`** is a folder, or `{ folder, filename }` for a filename template. Results keep their path inside the selected folder: `assets/ui/buttons/play.png` becomes `public/ui/buttons/play.webp`.
 - **Without a destination** nothing is written, and the files come back on the result.
+- **`onProgress`** is called as the action moves through its files, with the same events as in [build](#build).
 
 Chain actions by passing one result's files to the next:
 
@@ -540,6 +541,10 @@ if (!result.ok) process.exit(1);
 | `destination` | Destination folder, like `--destination`.            | from the config             |
 | `dryRun`      | Process everything, write nothing.                   | `false`                     |
 | `strict`      | Warnings make `result.ok` false.                     | `false`                     |
+| `cache`       | Reuse earlier results, like `--cache`.               | from the config             |
+| `onProgress`  | Called as each action moves through its files.       | none                        |
+
+`onProgress` receives `{ label, index, actions, done, total, file }`: the action's label and its place among all `actions`, how many of its `total` files are `done`, and the `file` that just started.
 
 Problems inside the build land in `result.errors`. `build` throws only for a broken setup, like a missing source folder or a destination that would overwrite the source.
 

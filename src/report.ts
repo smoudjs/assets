@@ -21,8 +21,6 @@ export function formatReport(input: ActionResult | ActionResult[] | BuildResult,
   const build = 'actions' in input ? input : undefined;
   const results: ActionResult[] = 'actions' in input ? input.actions : toArray(input);
   const lines: string[] = [];
-  lines.push(bold(`smoud-assets v${__VERSION__}`) + (build?.dryRun ? yellow('  dry run, nothing written') : ''));
-  lines.push('');
 
   const labelWidth = Math.max(12, ...results.map((result) => result.label.length));
   for (const [index, result] of results.entries()) {

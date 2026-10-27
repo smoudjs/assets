@@ -4,7 +4,15 @@
 import { watch as watchPath, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 // the engine comes from index.js like in cli.ts: the CLI bundle shares it with dist/index.js, where actions are registered
-import { build, formatReport, presetFilePath, readConfigFile, type AssetsConfig, type BuildOptions } from './index.js';
+import {
+  build,
+  formatReport,
+  presetFilePath,
+  progressIndicator,
+  readConfigFile,
+  type AssetsConfig,
+  type BuildOptions
+} from './index.js';
 import { dim, red } from './utils/colors.js';
 import { isPathUnderFolder, samePath, toPosix } from './utils/fs.js';
 
@@ -68,15 +76,17 @@ export async function watch(options: WatchOptions): Promise<void> {
   };
 
   const runBuild = async (): Promise<void> => {
-    // read here only for what watch decides itself; build reads and checks the config on its own
+    // read here only to find a preset file to watch; build reads and checks the config on its own
     const config = await readConfigOrEmpty(configFile);
-    const cache = options.cache ?? (typeof config.cache === 'boolean' ? config.cache : true);
+    const progress = progressIndicator();
     try {
-      const result = await build({ ...options, cache });
+      const result = await build({ ...options, onProgress: progress.update });
+      progress.stop();
       process.stdout.write(`${formatReport(result, { verbose: options.verbose })}\n`);
       destination = result.destination;
       watchSource(result.source);
     } catch (error) {
+      progress.stop();
       process.stderr.write(`${red(`error: ${(error as Error).message}`)}\n`);
     }
     watchPreset(config);

@@ -61,24 +61,32 @@ function register<A extends ActionDefinition<any>>(definition: A): RegisteredAct
 /** The `process` every action with a `transform` gets: select, check the options, transform, write, report. */
 async function processWithTransform(
   action: ActionDefinition,
-  { source, destination, cache, ...input }: ProcessParams & Record<string, unknown>
+  { source, destination, cache, onProgress, ...input }: ProcessParams & Record<string, unknown>
 ): Promise<ActionResult> {
   const started = performance.now();
   const options = resolveOptions(action.options, input);
   const selection = await selectFiles(source, { accepts: action.accepts, probe: action.probe });
+  const files = selection.files;
   const context: TransformContext = {
     folderName: selection.folderName,
     filenameTemplate: normalizeDestination(destination).filename as string
   };
+  const label = actionLabel(action.name, source);
+  const report: ReportProgress = (done, file) =>
+    onProgress?.({ label, index: 1, actions: 1, done, total: files.length, ...(file ? { file } : {}) });
+  const useCache = Boolean(cache && action.cache);
+
+  report(0);
   let result: Transformed = { outputs: [], warnings: [], errors: [], fromCache: 0 };
   try {
     result =
-      cache && action.cache
-        ? await transformWithCache(action, selection.files, options, context)
-        : await runTransform(action, selection.files, options, context);
+      action.cache === true
+        ? await transformEachFile(action, files, options, context, useCache, report)
+        : await transformTogether(action, files, options, context, useCache);
   } catch (error) {
     result.errors.push((error as Error).message);
   }
+  report(files.length);
   return finishAction({
     action: action.name,
     source,
@@ -111,36 +119,31 @@ async function runTransform(
   return { outputs: result.outputs, warnings: result.warnings ?? [], errors: result.errors ?? [], fromCache: 0 };
 }
 
-// `cache: true` gives every file its own entry and runs each missed file through `transform` alone, so its outputs
-// and warnings are known to be its own; `'together'` gives all files one entry. Results with errors are not stored.
-async function transformWithCache(
+/** `done` files finished; `file` set when a file starts. */
+type ReportProgress = (done: number, file?: string) => void;
+
+// `cache: true` declares that files do not depend on each other: each one runs through `transform` alone, so the
+// progress moves per file and, with the cache on, each file has its own entry. Results with errors are not stored.
+async function transformEachFile(
   action: ActionDefinition,
   files: AssetFile[],
   options: Record<string, unknown>,
-  context: TransformContext
+  context: TransformContext,
+  useCache: boolean,
+  report: ReportProgress
 ): Promise<Transformed> {
-  const keyFor = (inputs: AssetFile[]): string =>
-    cacheKey([action.name, action.version, options, context, inputs.map(describeInput)]);
-  const transformAndStore = async (key: string, inputs: AssetFile[]): Promise<Transformed> => {
-    const result = await runTransform(action, inputs, options, context);
-    if (!result.errors.length) await writeCache(key, result);
-    return result;
-  };
-
-  if (action.cache === 'together') {
-    const key = keyFor(files);
-    const cached = await readCache(key);
-    return cached ? { ...cached, errors: [], fromCache: files.length } : transformAndStore(key, files);
-  }
-
   const results: Transformed[] = new Array(files.length);
+  let done = 0;
   await forEachConcurrently(files, async (file, index) => {
-    const key = keyFor([file]);
-    const cached = await readCache(key);
+    const key = useCache ? cacheKeyFor(action, options, context, [file]) : undefined;
+    const cached = key ? await readCache(key) : undefined;
     if (cached) results[index] = { ...cached, errors: [], fromCache: 1 };
     else {
+      report(done, file.origin ?? file.path);
       try {
-        results[index] = await transformAndStore(key, [file]);
+        const result = await runTransform(action, [file], options, context);
+        if (key && !result.errors.length) await writeCache(key, result);
+        results[index] = result;
       } catch (error) {
         results[index] = {
           outputs: [],
@@ -150,6 +153,7 @@ async function transformWithCache(
         };
       }
     }
+    report(++done);
   });
   return {
     outputs: results.flatMap((result) => result.outputs),
@@ -157,6 +161,31 @@ async function transformWithCache(
     errors: results.flatMap((result) => result.errors),
     fromCache: results.reduce((total, result) => total + result.fromCache, 0)
   };
+}
+
+// all files in one `transform` call; with the cache on and `cache: 'together'`, one entry for all of them
+async function transformTogether(
+  action: ActionDefinition,
+  files: AssetFile[],
+  options: Record<string, unknown>,
+  context: TransformContext,
+  useCache: boolean
+): Promise<Transformed> {
+  const key = useCache ? cacheKeyFor(action, options, context, files) : undefined;
+  const cached = key ? await readCache(key) : undefined;
+  if (cached) return { ...cached, errors: [], fromCache: files.length };
+  const result = await runTransform(action, files, options, context);
+  if (key && !result.errors.length) await writeCache(key, result);
+  return result;
+}
+
+function cacheKeyFor(
+  action: ActionDefinition,
+  options: Record<string, unknown>,
+  context: TransformContext,
+  inputs: AssetFile[]
+): string {
+  return cacheKey([action.name, action.version, options, context, inputs.map(describeInput)]);
 }
 
 // everything about an input that can change what comes out; `meta` is left out because it is read from the bytes
@@ -169,16 +198,19 @@ function describeInput(file: AssetFile): unknown {
 // Options
 // ---------------------------------------------------------------------------
 
-const RESERVED_KEYS = ['source', 'destination', 'cache'];
+// what every `process` takes besides the action's options (`ProcessParams`); never an action option
+const RESERVED_KEYS = ['source', 'destination', 'cache', 'onProgress'];
 
 /**
  * The options an action runs with: every value checked against the table, every missing key filled with its
- * default. An unknown key or a wrong value throws one error listing every problem.
+ * default. An unknown key or a wrong value throws one error listing every problem. The `process` parameters
+ * (`source`, `destination`, `cache`, `onProgress`) are skipped, so a whole `process` input can be passed.
  */
 export function resolveOptions<O extends Record<string, unknown>>(table: OptionTable, input: Record<string, unknown>): O {
   const problems: string[] = [];
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
+    if (RESERVED_KEYS.includes(key)) continue;
     const descriptor = table[key];
     if (!descriptor) {
       const hint = suggest(key, [...Object.keys(table), ...RESERVED_KEYS]);

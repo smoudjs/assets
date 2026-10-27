@@ -45,6 +45,7 @@ export { build, type BuildOptions } from './build.js';
 export { loadPreset, presetFilePath, readConfigFile } from './config.js';
 export { destinationPath, selectFiles, writeFiles, type Selection, type SelectOptions } from './files.js';
 export { formatReport, type ReportOptions } from './report.js';
+export { progressIndicator, type ProgressIndicator } from './progress.js';
 export { contentHash, extension, renderFilename } from './utils/fs.js';
 export type * from './types.js';
 

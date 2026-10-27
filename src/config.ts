@@ -170,7 +170,7 @@ function resolveFolders(
     const override = overrides[key];
     return override !== undefined ? path.resolve(override) : path.resolve(dir, value ?? fallback);
   };
-  return { source: resolveFolder('source', 'assets'), destination: resolveFolder('destination', 'assets/compiled') };
+  return { source: resolveFolder('source', 'assets'), destination: resolveFolder('destination', 'assets/optimized') };
 }
 
 // the three layouts refused here would let `clean` delete the source or the project

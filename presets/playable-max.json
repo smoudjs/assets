@@ -4,11 +4,11 @@
     "atlas": { "format": "webp", "quality": 60 }
   },
   "actions": [
-    { "action": "image", "source": { "include": "*.png", "when": { "size": ">400kb" } }, "format": "webp", "quality": 45 },
-    { "action": "image", "source": { "include": "*.png", "when": { "size": "<=400kb" } }, "format": "webp" },
+    { "action": "image", "source": { "include": "*.png", "when": { "size": ">300kb" } }, "format": "webp", "quality": 45 },
+    { "action": "image", "source": { "include": "*.png", "when": { "size": "<=300kb" } }, "format": "webp" },
     {
       "action": "image",
-      "source": { "include": "#rest", "exclude": "*.svg", "when": { "size": ">400kb" } },
+      "source": { "include": "#rest", "exclude": "*.svg", "when": { "size": ">300kb" } },
       "quality": 45
     },
     { "action": "image", "source": { "include": "#rest", "exclude": "*.svg" } },
