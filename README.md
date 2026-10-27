@@ -20,7 +20,7 @@ Use it two ways:
 - [The config file](#the-config-file)
   - [Presets](#presets)
 - [Command line](#command-line)
-- [Action reference](#action-reference): image, atlas, audio, audiosprite, json, xml, copy
+- [Action reference](#action-reference): image, atlas, audio, audiosprite, gltf, json, xml, copy
 - [JavaScript API](#javascript-api)
   - [Your own actions](#your-own-actions)
 
@@ -30,6 +30,7 @@ Use it two ways:
 - 🧩 **Texture atlases**: MaxRects packing, trimming, extrusion, several pages, TexturePacker-compatible JSON.
 - 🔊 **Audio**: convert to mp3, ogg, opus or m4a, downmix to mono, resample, set the bitrate. Never raises the quality of a source.
 - 🎚️ **Audio sprites**: many sounds in one file, with a JSON for Howler, Phaser, PixiJS Sound or your own loader.
+- 🧊 **3D models**: clean up, simplify and quantize glTF and GLB, strip normals or materials, extract textures. No decoder needed.
 - 📄 **Data files**: JSON and XML minified.
 - 🎯 **Explicit selection**: folders, globs, `#rest`, filters on size and image facts.
 - 🔗 **Chaining**: virtual `#folders` pass results from one action to the next, for example rasterize svg icons, then pack them.
@@ -130,12 +131,12 @@ Each entry in `actions` is one step: which files, what to do, where to put the r
 { "action": "image", "source": "ui", "destination": "interface", "format": "webp", "quality": 80 }
 ```
 
-| Key           | What it does                                                                                             |
-| ------------- | -------------------------------------------------------------------------------------------------------- |
-| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `json`, `xml`, `copy`, or one you registered. |
-| `source`      | Which files. Omitted: every file the action can handle.                                                  |
-| `destination` | Where the results go. Omitted: each result lands where its source was.                                   |
-| anything else | Options of the action, see [Action reference](#action-reference).                                        |
+| Key           | What it does                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `json`, `xml`, `copy`, or one you registered. |
+| `source`      | Which files. Omitted: every file the action can handle.                                                          |
+| `destination` | Where the results go. Omitted: each result lands where its source was.                                           |
+| anything else | Options of the action, see [Action reference](#action-reference).                                                |
 
 A plain string is an action with default settings: `"image"` equals `{ "action": "image" }`.
 
@@ -172,16 +173,23 @@ An action only takes files it can handle. `image` never selects a `.json`, and `
 }
 ```
 
-**`when`** filters on facts about a file. `size` is known for every file. Other facts come from the action that selects: `image` knows `width`, `height`, `alpha` and `animated`, and `audio` knows `duration`, `channels`, `sampleRate` and `bitrate`.
+**`when`** filters on facts about a file. `size` is known for every file. Other facts come from the action that selects: `image` knows `width`, `height`, `alpha` and `animated`, `audio` knows `duration`, `channels`, `sampleRate` and `bitrate`, and `gltf` knows `triangles`, `vertices`, `textures` and `animations`.
 
-| Fact       | Example                         | Meaning                                |
-| ---------- | ------------------------------- | -------------------------------------- |
-| `size`     | `">200kb"`, `["<2mb", ">10kb"]` | File size, with `b`, `kb`, `mb`, `gb`. |
-| `width`    | `">=1024"`                      | Width in pixels.                       |
-| `height`   | `"<512"`                        | Height in pixels.                      |
-| `alpha`    | `false`                         | Has transparency.                      |
-| `animated` | `true`                          | Has more than one frame.               |
-| `duration` | `">10"`                         | Length of a sound in seconds.          |
+| Fact         | Example                         | Meaning                                |
+| ------------ | ------------------------------- | -------------------------------------- |
+| `size`       | `">200kb"`, `["<2mb", ">10kb"]` | File size, with `b`, `kb`, `mb`, `gb`. |
+| `width`      | `">=1024"`                      | Width in pixels.                       |
+| `height`     | `"<512"`                        | Height in pixels.                      |
+| `alpha`      | `false`                         | Has transparency.                      |
+| `animated`   | `true`                          | Has more than one frame.               |
+| `duration`   | `">10"`                         | Length of a sound in seconds.          |
+| `channels`   | `"1"`                           | 1 for mono, 2 for stereo.              |
+| `sampleRate` | `">=44100"`                     | Sample rate of a sound in Hz.          |
+| `bitrate`    | `">128"`                        | Bitrate of a sound in kbps.            |
+| `triangles`  | `">50000"`                      | Triangles in a model.                  |
+| `vertices`   | `">10000"`                      | Vertices in a model.                   |
+| `textures`   | `"0"`                           | Textures in a model.                   |
+| `animations` | `">0"`                          | Animations in a model.                 |
 
 Comparisons are `>`, `>=`, `<`, `<=`, `!=`, `=`, or a bare number for equality. In a list, every bound must hold. A fact the action cannot read excludes the file, with a warning.
 
@@ -275,11 +283,11 @@ The rules:
 
 **Built-in presets:**
 
-| Preset         | What it does                                                                                                                                                                                                                      |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default`      | Compresses images in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                               |
-| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases default to quality 70. Sounds become mono mp3 at 96 kbps. Then json, xml and copy like `default`. |
-| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas pages default to webp at quality 60. Sounds become mono mp3 at 64 kbps.                                        |
+| Preset         | What it does                                                                                                                                                                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `default`      | Compresses images in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                                                                               |
+| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases default to quality 70. Sounds become mono mp3 at 96 kbps. Models drop normals and extract their textures. Then json, xml and copy like `default`. |
+| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas pages default to webp at quality 60. Sounds become mono mp3 at 64 kbps. Model textures become webp, and models over 50,000 triangles are halved.               |
 
 ### How a build runs
 
@@ -379,16 +387,16 @@ Packs images into one or more pages, with a JSON per page in the TexturePacker "
 { "action": "atlas", "source": "sprites", "padding": 2, "extrude": 1 }
 ```
 
-| Option       | What it does                                                          | Default             |
-| ------------ | --------------------------------------------------------------------- | ------------------- |
-| `maxWidth`   | Widest page in pixels. What does not fit goes to the next page.       | `2048`              |
-| `maxHeight`  | Tallest page in pixels.                                               | `2048`              |
-| `padding`    | Empty pixels between sprites and to the page edge.                    | `2`                 |
-| `extrude`    | Repeat each sprite's edge pixels this far outwards, against bleeding. | `0`                 |
-| `trim`       | Cut transparent borders. Frames keep their original size and offset.  | `true`              |
-| `powerOfTwo` | Round page sizes up to a power of two.                                | `false`             |
-| `format`     | Page format: `png`, `jpeg`, `webp`, `avif`.                           | `png`               |
-| `quality`    | 1 to 100. For png pages, setting it switches to palette compression.  | not set             |
+| Option       | What it does                                                          | Default |
+| ------------ | --------------------------------------------------------------------- | ------- |
+| `maxWidth`   | Widest page in pixels. What does not fit goes to the next page.       | `2048`  |
+| `maxHeight`  | Tallest page in pixels.                                               | `2048`  |
+| `padding`    | Empty pixels between sprites and to the page edge.                    | `2`     |
+| `extrude`    | Repeat each sprite's edge pixels this far outwards, against bleeding. | `0`     |
+| `trim`       | Cut transparent borders. Frames keep their original size and offset.  | `true`  |
+| `powerOfTwo` | Round page sizes up to a power of two.                                | `false` |
+| `format`     | Page format: `png`, `jpeg`, `webp`, `avif`.                           | `png`   |
+| `quality`    | 1 to 100. For png pages, setting it switches to palette compression.  | not set |
 
 `"source": "sprites"` writes `sprites.png` and `sprites.json`. `"destination": { "filename": "world" }` names them `world.png` and `world.json`. Frame names are the paths inside the selected folder without the extension, like `hero/idle_01`:
 
@@ -455,15 +463,15 @@ Joins many sounds into one file with silence between them, plus a JSON that tell
 { "src": ["sfx.mp3"], "sprite": { "click": [0, 200], "coin": [450, 100], "ui/close": [800, 350] } }
 ```
 
-| Option       | What it does                                                          | Default             |
-| ------------ | --------------------------------------------------------------------- | ------------------- |
-| `format`     | `mp3`, `ogg`, `opus`, `m4a`, `wav`.                                   | `mp3`               |
-| `quality`    | 1 to 100, as in [audio](#audio).                                      | `80`                |
-| `bitrate`    | 8 to 320 kbps. Wins over `quality`.                                   | none                |
-| `channels`   | `1` or `2`. Never more than the sounds have.                          | from the sounds     |
-| `sampleRate` | As in [audio](#audio). Never above the sounds.                        | from the sounds     |
-| `gap`        | Seconds of silence between sounds, so one never bleeds into the next. | `0.25`              |
-| `json`       | Layout of the JSON, see the table below.                              | `howler`            |
+| Option       | What it does                                                          | Default         |
+| ------------ | --------------------------------------------------------------------- | --------------- |
+| `format`     | `mp3`, `ogg`, `opus`, `m4a`, `wav`.                                   | `mp3`           |
+| `quality`    | 1 to 100, as in [audio](#audio).                                      | `80`            |
+| `bitrate`    | 8 to 320 kbps. Wins over `quality`.                                   | none            |
+| `channels`   | `1` or `2`. Never more than the sounds have.                          | from the sounds |
+| `sampleRate` | As in [audio](#audio). Never above the sounds.                        | from the sounds |
+| `gap`        | Seconds of silence between sounds, so one never bleeds into the next. | `0.25`          |
+| `json`       | Layout of the JSON, see the table below.                              | `howler`        |
 
 `json` layouts:
 
@@ -480,6 +488,59 @@ Good to know:
 - Sound names are the paths inside the folder without the extension, like `ui/close`.
 - Channels and sample rate come from the sounds, never higher.
 - Looping is set in the game, not in the JSON.
+
+### gltf
+
+Optimizes glTF models, `.glb` and `.gltf`. Everything it writes loads in any engine without a decoder.
+
+```json
+{ "action": "gltf", "source": "models", "normals": false, "textures": { "extract": true } }
+```
+
+| Option         | What it does                                       | Default       |
+| -------------- | -------------------------------------------------- | ------------- |
+| `format`       | `glb`, `gltf` (separate files) or `gltf-embedded`. | as the source |
+| `quantize`     | Smaller vertex data, `KHR_mesh_quantization`.      | `true`        |
+| `simplify`     | Fewer triangles, see below.                        | none          |
+| `textures`     | Re-encode or extract textures, see below.          | as they are   |
+| `normals`      | `false` removes them; engines can compute them.    | `true`        |
+| `tangents`     | `false` removes them.                              | `true`        |
+| `uvs`          | `false` removes them, and the textures with them.  | `true`        |
+| `vertexColors` | `false` removes them.                              | `true`        |
+| `materials`    | `false` removes them, and the textures with them.  | `true`        |
+| `animations`   | `false` removes them.                              | `true`        |
+
+`simplify`:
+
+- `ratio`: share of triangles to keep, 0 to 1. Simplify runs only with it.
+- `error`: the most the shape may change, as a share of the model size. Default `0.01`; simplifying stops there.
+- `method`: `collapse` keeps the shape and UV seams. `sloppy` is coarser, for far LODs, and needs a higher `error`, like `0.1`.
+
+`textures`:
+
+- `format`, `quality`, `maxSize`: re-encode through the image action. Without them, textures stay as they are.
+- `extract: true`: textures are written next to the model, like `crate_wood_baseColor.png` (model, material, slot), and removed from it. UVs stay, so the game can put them back.
+
+LODs are one action per level:
+
+```json
+{ "action": "gltf", "source": "hero", "destination": { "filename": "[name]_lod0" } },
+{ "action": "gltf", "source": "hero", "destination": { "filename": "[name]_lod1" }, "simplify": { "ratio": 0.25 } }
+```
+
+Extracted textures can go on to another action through a virtual folder:
+
+```json
+{ "action": "gltf", "source": "models", "textures": { "extract": true }, "destination": "#models" },
+{ "action": "image", "source": "#models", "format": "webp", "destination": "models" },
+{ "action": "copy", "source": { "include": "#models", "exclude": "*.png" }, "destination": "models" }
+```
+
+Good to know:
+
+- A `.gltf` brings its `.bin` and textures, and no later action takes them. Put `gltf` before your image actions.
+- Cleanup always runs: unused and duplicate parts go and vertices are welded. It never changes how a model looks.
+- Extracted textures fit an atlas only when they do not repeat; the game maps the UVs onto the frame.
 
 ### json
 
@@ -506,6 +567,7 @@ import {
   atlas,
   audio,
   audiosprite,
+  gltf,
   json,
   xml,
   copy,
@@ -571,6 +633,7 @@ const sprite = await audiosprite.packAudioSprite(
   ],
   { gap: 0.5 }
 );
+const model = await gltf.optimizeGltf({ name: 'crate', data: glbBuffer }, { simplify: { ratio: 0.5 } });
 const small = json.minifyJson(jsonBuffer);
 const tight = xml.minifyXml(xmlBuffer, { comments: false });
 ```
@@ -583,6 +646,8 @@ const tight = xml.minifyXml(xmlBuffer, { comments: false });
 | `audio.readAudioMeta(data)`                    | `{ format, duration, channels, sampleRate, bitrate }`                                                                                           |
 | `atlas.packAtlas(sprites, options)`            | `{ pages, warnings, errors }`. Each page is `{ image, width, height, frames }`. `errors` lists sprites that were left out.                      |
 | `audiosprite.packAudioSprite(sounds, options)` | `{ data, format, duration, channels, sampleRate, bitrate, sounds }`. Each sound is `{ name, start, duration }`, in ms.                          |
+| `gltf.optimizeGltf(model, options)`            | `{ data, format, files, triangles, vertices, textures, animations }`. `files` are the `.bin` and textures written next to the model.            |
+| `gltf.readGltfMeta(data)`                      | `{ format, triangles, vertices, textures, animations }`                                                                                         |
 | `json.minifyJson(data)`                        | A buffer. Throws on invalid JSON.                                                                                                               |
 | `xml.minifyXml(data, options)`                 | A buffer.                                                                                                                                       |
 
@@ -599,12 +664,12 @@ for (const file of files) file.data = (await image.optimizeImage(file.data, { qu
 await writeFiles(files, { folder: 'public/ui', filename: '[name].[hash][ext]' });
 ```
 
-| `selectFiles` option | What it does                                                                           |
-| -------------------- | -------------------------------------------------------------------------------------- |
-| `root`               | Folder the patterns are relative to. Default: the working directory.                   |
-| `accepts`            | Keep only these extensions, like `['png', 'jpg']`.                                     |
-| `exclude`            | Patterns that never match.                                                             |
-| `probe`              | A function that reads facts from a file's bytes, for `when` filters other than `size`. |
+| `selectFiles` option | What it does                                                                   |
+| -------------------- | ------------------------------------------------------------------------------ |
+| `root`               | Folder the patterns are relative to. Default: the working directory.           |
+| `accepts`            | Keep only these extensions, like `['png', 'jpg']`.                             |
+| `exclude`            | Patterns that never match.                                                     |
+| `probe`              | A function that reads facts from a file, for `when` filters other than `size`. |
 
 `selectFiles` knows nothing about images. Pass a probe, like `image.readImageMeta`, to filter on `width` or `alpha`.
 
@@ -722,6 +787,8 @@ await upper.process({ source: 'texts', destination: 'public/texts', suffix: '-lo
 
 `register` adds `process` around your `transform`. It selects the files with `accepts` and `probe`, checks the options and fills their defaults, writes the outputs, and builds the result for the report.
 
+A file that points to other files, like a `.gltf` to its `.bin`, needs `findCompanions(file)`: return those paths, relative to the file. They are read into `file.companions`, and no later action takes them.
+
 `cache: true` lets the cache keep each file's result. Use `cache: 'together'` when every output depends on all the files, like an atlas. Caching needs a `version`: raise it whenever you change what the action produces, or old results keep coming back. Without `cache`, the action always runs.
 
 **What `transform` gets and returns:**
@@ -744,7 +811,7 @@ Spread the input file into each output, `{ ...file, data }`, so the report links
 
 **Writing `process` yourself.** An action that defines `process` instead of `transform` is used exactly as written, for example when it needs its own file selection. Use `selectFiles` to find files, and `finishAction` to write the outputs and build a result the report and `build` understand.
 
-Option kinds are `boolean`, `number` with `min` and `max`, `string`, `enum` with `values`, `object` with `properties`, `list` with `items`, and `oneOf` with alternatives. Each takes a `description` and an optional `default`.
+Each option has a `kind` (`boolean`, `number`, `string`, `enum`, `object`, `list` or `oneOf`), a `description` and an optional `default`. Values that don't fit the kind are errors.
 
 ## Issues
 

@@ -55,6 +55,8 @@ interface BuildState {
   taken: Set<string>;
   /** Origins the config's own actions took; the preset's actions never see them. */
   takenByOwnActions: Set<string>;
+  /** Origins read as another file's companions, like the textures of a .gltf; no later action sees them. */
+  companions: Set<string>;
   /** Origins per action, for the overlap warning. */
   selected: Map<PreparedAction, string[]>;
   /** Destination-relative path → who produced it, for collision detection. */
@@ -94,6 +96,7 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
     result,
     taken: new Set(),
     takenByOwnActions: new Set(),
+    companions: new Set(),
     selected: new Map(),
     produced: new Map(),
     virtual: {},
@@ -105,7 +108,10 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
     // a preset is written for many projects, so its actions that find nothing in this one are skipped quietly
     if (!files || (action.fromPreset && !files.length)) continue;
     const origins = files.map((file) => file.origin as string);
-    for (const origin of origins) {
+    // a file's companions, like the .bin of a .gltf, are used up with it: no later action takes them
+    const companions = files.flatMap((file) => (file.companions ?? []).map((companion) => companion.origin as string));
+    for (const origin of companions) state.companions.add(origin);
+    for (const origin of [...origins, ...companions]) {
       state.taken.add(origin);
       if (!action.fromPreset) state.takenByOwnActions.add(origin);
     }
@@ -143,7 +149,9 @@ async function selectActionFiles(action: PreparedAction, state: BuildState): Pro
     }
   }
   const skip = (origin: string) =>
-    (source.rest && state.taken.has(origin)) || (action.fromPreset && state.takenByOwnActions.has(origin));
+    (source.rest && state.taken.has(origin)) ||
+    (action.fromPreset && state.takenByOwnActions.has(origin)) ||
+    state.companions.has(origin);
   const selection = await selectFiles(
     { include: source.include, exclude: source.exclude, when: source.when },
     {
@@ -152,6 +160,7 @@ async function selectActionFiles(action: PreparedAction, state: BuildState): Pro
       exclude: pool ? [] : state.ignore,
       accepts: action.action.accepts,
       probe: action.action.probe,
+      findCompanions: action.action.findCompanions,
       skip
     }
   );

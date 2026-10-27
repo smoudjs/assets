@@ -18,6 +18,23 @@
       "format": "ogg",
       "json": "phaser"
     },
+    { "action": "gltf", "source": "models/crate", "format": "glb" },
+    {
+      "action": "gltf",
+      "source": "models/crate.glb",
+      "destination": "models/extracted",
+      "normals": false,
+      "vertexColors": false,
+      "animations": false,
+      "textures": { "extract": true, "format": "webp" }
+    },
+    { "action": "gltf", "source": "models/sphere.glb", "destination": { "folder": "models/lods", "filename": "[name]_lod0" } },
+    {
+      "action": "gltf",
+      "source": "models/sphere.glb",
+      "destination": { "folder": "models/lods", "filename": "[name]_lod1" },
+      "simplify": { "ratio": 0.25 }
+    },
     { "action": "image", "source": "#rest" },
     { "source": { "include": "spine", "exclude": ["*.json", "*.png"] }, "action": "copy" }
   ]

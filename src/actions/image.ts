@@ -76,8 +76,12 @@ export interface OptimizedImage {
 }
 
 export interface ImageAction extends ActionDefinition<ImageOptions> {
-  /** Format, width, height, alpha and animated of an image, read from its header. Also the probe for `when`. */
-  readImageMeta(data: Buffer): Promise<Partial<AssetMeta>>;
+  /**
+   * Format, width, height, alpha and animated of an image, from its bytes or its path. All come from the header except
+   * `alpha` of an image with an alpha channel, which decodes every pixel; `'cheap'`, or a list without `alpha`, skips
+   * that. Default: all. Facts in `known` are not read again. Also the probe for `when`.
+   */
+  readImageMeta(input: Buffer | string, needs?: 'cheap' | string[], known?: Partial<AssetMeta>): Promise<Partial<AssetMeta>>;
   /**
    * Trim, resize, flatten and encode one image. Returns null when the source format cannot be kept (svg and
    * other vector sources) and no raster `format` was asked for.
@@ -233,13 +237,26 @@ export const image: ImageAction = {
   accepts: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'tif', 'tiff', 'svg'],
   options,
 
-  async readImageMeta(data) {
-    const meta = await sharp(data).metadata();
-    return toAssetMeta(meta, await isTransparent(data, meta));
+  async readImageMeta(input, needs, known = {}) {
+    const result: Partial<AssetMeta> = {};
+    if (known.width === undefined) {
+      const meta = await sharp(input).metadata();
+      result.format = normalizeFormat(meta.format) ?? meta.format;
+      result.width = meta.width;
+      result.height = meta.pageHeight ?? meta.height;
+      result.animated = (meta.pages ?? 1) > 1;
+      // no alpha channel: no transparency. Many tools give every png a channel, so only the pixels can tell then
+      if (!meta.hasAlpha) result.alpha = false;
+    }
+    const wantsAlpha = needs === undefined || (needs !== 'cheap' && needs.includes('alpha'));
+    if (wantsAlpha && result.alpha === undefined && known.alpha === undefined) {
+      result.alpha = !(await sharp(input).stats()).isOpaque;
+    }
+    return result;
   },
 
-  probe(data) {
-    return image.readImageMeta(data);
+  probe(input, needs, known) {
+    return image.readImageMeta(input, needs, known);
   },
 
   async optimizeImage(data, input = {}) {
@@ -449,14 +466,4 @@ function formatOfExtension(filePath: string): Format | null {
 async function isTransparent(data: Buffer, meta: Metadata): Promise<boolean> {
   if (!meta.hasAlpha) return false;
   return !(await sharp(data).stats()).isOpaque;
-}
-
-function toAssetMeta(meta: Metadata, transparent: boolean): Partial<AssetMeta> {
-  return {
-    format: normalizeFormat(meta.format) ?? meta.format,
-    width: meta.width,
-    height: meta.pageHeight ?? meta.height,
-    alpha: transparent,
-    animated: (meta.pages ?? 1) > 1
-  };
 }

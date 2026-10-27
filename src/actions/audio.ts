@@ -70,8 +70,11 @@ export interface EncodedAudio {
 }
 
 export interface AudioAction extends ActionDefinition<AudioOptions> {
-  /** Format, duration (seconds), channels, sampleRate (Hz) and bitrate (kbps) of a sound. Also the probe for `when`. */
-  readAudioMeta(data: Buffer): Promise<Partial<AssetMeta>>;
+  /**
+   * Format, duration (seconds), channels, sampleRate (Hz) and bitrate (kbps) of a sound, from its bytes or its path.
+   * Also the probe for `when`.
+   */
+  readAudioMeta(input: Buffer | string): Promise<Partial<AssetMeta>>;
   /**
    * Encode one sound, downmixed and resampled as asked. Channels, sample rate and bitrate never go above the
    * source's. Returns null when the source codec has no matching format and no `format` was asked for.
@@ -117,8 +120,12 @@ export const audio: AudioAction = {
   accepts: ['mp3', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'wav', 'flac', 'webm'],
   options,
 
-  async readAudioMeta(data) {
-    const source = await withTemporaryFolder((folder) => readSourceInfo(data, folder));
+  async readAudioMeta(input) {
+    // a file on disk is read where it is; bytes in memory go through a temporary file
+    const source =
+      typeof input === 'string'
+        ? await readFileInfo(input)
+        : await withTemporaryFolder((folder) => readSourceInfo(input, folder));
     return {
       format: formatOfCodec(source.codec) ?? source.codec,
       duration: source.duration,
@@ -128,8 +135,9 @@ export const audio: AudioAction = {
     };
   },
 
-  probe(data) {
-    return audio.readAudioMeta(data);
+  // every fact comes from one quick ffmpeg read, so `'cheap'` already gets them all
+  probe(input) {
+    return audio.readAudioMeta(input);
   },
 
   async encodeAudio(data, input = {}) {
@@ -238,10 +246,14 @@ interface SourceInfo {
 async function readSourceInfo(data: Buffer, folder: string): Promise<SourceInfo> {
   const input = path.join(folder, 'input');
   await fs.writeFile(input, data);
+  return readFileInfo(input);
+}
+
+async function readFileInfo(file: string): Promise<SourceInfo> {
   // a missing ffmpeg fails here with its own message, not as an unreadable file
   await findFfmpeg();
   // ffmpeg prints what it found about its input while starting; `-t 0` stops it before decoding anything
-  const { stderr } = await runFfmpeg(['-i', input, '-t', '0', '-f', 'null', '-']).catch(() => {
+  const { stderr } = await runFfmpeg(['-i', file, '-t', '0', '-f', 'null', '-']).catch(() => {
     throw new Error('not an audio file ffmpeg can read');
   });
   const inputSection = stderr.split(/\n(?:Stream mapping|Output #0)/)[0] ?? stderr;

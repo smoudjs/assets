@@ -8,6 +8,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Document, NodeIO } from '@gltf-transform/core';
 import { runFfmpeg } from '@smoud/ffmpeg';
 import sharp from 'sharp';
 
@@ -183,3 +184,99 @@ await tone('audio/sfx/coin.wav', 990, 0.1, ['-ac', '2', '-ar', '44100']);
 await tone('audio/sfx/jump.m4a', 520, 0.5, ['-ac', '1', '-ar', '44100', '-c:a', 'aac', '-b:a', '64k']);
 await tone('audio/sfx/hit.flac', 110, 0.3, ['-ac', '1', '-ar', '44100']);
 await tone('audio/sfx/laser.opus', 1760, 0.5, ['-ac', '1', '-c:a', 'libopus', '-b:a', '32k']);
+
+// --- models: glTF built with glTF Transform, each under 20kb -----------------------------------------
+// crate: a textured box with vertex colors and an animation, plus a copy with an identical material and an unused
+// material for the cleanup to find; sphere: 1152 positions-only triangles for simplify
+
+/** A unit box with four vertices per face, so each face has its own normal and UVs. Faces are [normal, u, v]. */
+function boxGeometry() {
+  const faces = [
+    [[1, 0, 0], [0, 0, -1], [0, 1, 0]],
+    [[-1, 0, 0], [0, 0, 1], [0, 1, 0]],
+    [[0, 1, 0], [1, 0, 0], [0, 0, -1]],
+    [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+    [[0, 0, 1], [1, 0, 0], [0, 1, 0]],
+    [[0, 0, -1], [-1, 0, 0], [0, 1, 0]]
+  ];
+  const geometry = { position: [], normal: [], uv: [], color: [], index: [] };
+  faces.forEach(([normal, u, v], face) => {
+    for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      geometry.position.push(...normal.map((n, i) => (n + a * u[i] + b * v[i]) / 2));
+      geometry.normal.push(...normal);
+      geometry.uv.push((a + 1) / 2, (1 - b) / 2);
+      geometry.color.push(face / 5, 1 - face / 5, 0.5, 1);
+    }
+    geometry.index.push(face * 4, face * 4 + 1, face * 4 + 2, face * 4, face * 4 + 2, face * 4 + 3);
+  });
+  return geometry;
+}
+
+async function crateDocument() {
+  const doc = new Document();
+  const buffer = doc.createBuffer('crate').setURI('crate.bin');
+  const accessor = (type, array) => doc.createAccessor().setType(type).setArray(array).setBuffer(buffer);
+  const wood = await png(paint(32, 32, (x, y) => [150 + ((x * 7) % 40), 100 + ((y * 5) % 30), 50, 255]));
+  const texture = doc.createTexture('wood').setImage(wood).setMimeType('image/png').setURI('crate.png');
+  doc.createMaterial('unused');
+  const box = boxGeometry();
+  const scene = doc.createScene('scene');
+  const nodes = ['crate', 'crate-copy'].map((name, i) => {
+    const primitive = doc
+      .createPrimitive()
+      .setAttribute('POSITION', accessor('VEC3', new Float32Array(box.position)))
+      .setAttribute('NORMAL', accessor('VEC3', new Float32Array(box.normal)))
+      .setAttribute('TEXCOORD_0', accessor('VEC2', new Float32Array(box.uv)))
+      .setAttribute('COLOR_0', accessor('VEC4', new Float32Array(box.color)))
+      .setIndices(accessor('SCALAR', new Uint16Array(box.index)))
+      .setMaterial(doc.createMaterial(`wood-${i}`).setBaseColorTexture(texture));
+    const node = doc.createNode(name).setMesh(doc.createMesh(name).addPrimitive(primitive)).setTranslation([i * 2, 0, 0]);
+    scene.addChild(node);
+    return node;
+  });
+  const sampler = doc
+    .createAnimationSampler()
+    .setInput(accessor('SCALAR', new Float32Array([0, 1, 2])))
+    .setOutput(accessor('VEC4', new Float32Array([0, 0, 0, 1, 0, Math.SQRT1_2, 0, Math.SQRT1_2, 0, 1, 0, 0])))
+    .setInterpolation('LINEAR');
+  const channel = doc.createAnimationChannel().setTargetNode(nodes[0]).setTargetPath('rotation').setSampler(sampler);
+  doc.createAnimation('spin').addSampler(sampler).addChannel(channel);
+  return doc;
+}
+
+function sphereDocument() {
+  const doc = new Document();
+  const buffer = doc.createBuffer('sphere').setURI('sphere.bin');
+  const steps = 24;
+  const position = [];
+  const index = [];
+  for (let ring = 0; ring <= steps; ring++) {
+    for (let segment = 0; segment <= steps; segment++) {
+      const [theta, phi] = [(ring / steps) * Math.PI, (segment / steps) * 2 * Math.PI];
+      position.push(Math.sin(theta) * Math.cos(phi), Math.cos(theta), Math.sin(theta) * Math.sin(phi));
+    }
+  }
+  for (let ring = 0; ring < steps; ring++) {
+    for (let segment = 0; segment < steps; segment++) {
+      const [a, b] = [ring * (steps + 1) + segment, (ring + 1) * (steps + 1) + segment];
+      index.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const accessor = (type, array) => doc.createAccessor().setType(type).setArray(array).setBuffer(buffer);
+  const primitive = doc
+    .createPrimitive()
+    .setAttribute('POSITION', accessor('VEC3', new Float32Array(position)))
+    .setIndices(accessor('SCALAR', new Uint16Array(index)));
+  const node = doc.createNode('sphere').setMesh(doc.createMesh('sphere').addPrimitive(primitive));
+  doc.createScene('scene').addChild(node);
+  return doc;
+}
+
+const io = new NodeIO();
+await write('models/crate.glb', Buffer.from(await io.writeBinary(await crateDocument())));
+{
+  const { json, resources } = await io.writeJSON(await crateDocument());
+  await write('models/crate/crate.gltf', Buffer.from(`${JSON.stringify(json, null, 2)}\n`));
+  for (const [uri, data] of Object.entries(resources)) await write(`models/crate/${uri}`, Buffer.from(data));
+}
+await write('models/sphere.glb', Buffer.from(await io.writeBinary(sphereDocument())));

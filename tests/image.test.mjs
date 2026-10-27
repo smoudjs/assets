@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import sharp from 'sharp';
+import { actions, image } from '../dist/index.js';
 import { run, scratchAssets } from './helpers.mjs';
 
 const facts = async (buffer) => {
@@ -159,6 +160,45 @@ describe('image: when and failures', () => {
     assert.deepEqual(result.actions[0].files.map((f) => f.source).sort(), [
       'images/backgrounds/forest/night.jpg',
       'images/backgrounds/sky.jpg'
+    ]);
+  });
+
+  it('when checks size first, then cheap facts, and works out alpha only for files that passed', async () => {
+    const calls = [];
+    actions.register({
+      name: 'imageProbeSpy',
+      accepts: image.accepts,
+      options: {},
+      probe(input, needs, known) {
+        calls.push({ input: typeof input, needs });
+        return image.probe(input, needs, known);
+      },
+      async transform(files) {
+        return files;
+      }
+    });
+
+    const tooSmall = await run({
+      actions: [{ action: 'imageProbeSpy', source: { include: 'images/ui', when: { size: '>1mb', width: '<50' } } }]
+    });
+    assert.deepEqual(tooSmall.result.actions[0].files, []);
+    assert.deepEqual(calls, [], 'a file failing size is never probed');
+
+    const { result } = await run({
+      actions: [{ action: 'imageProbeSpy', source: { include: 'images/ui', when: { width: '<50', alpha: true } } }]
+    });
+    assert.deepEqual(result.actions[0].files.map((file) => file.source).sort(), [
+      'images/ui/buttons/pause.png',
+      'images/ui/buttons/play.png'
+    ]);
+    assert.ok(
+      calls.every((call) => call.input === 'string'),
+      'files on disk are probed by path'
+    );
+    const expensive = calls.filter((call) => call.needs !== 'cheap');
+    assert.deepEqual(expensive, [
+      { input: 'string', needs: ['alpha'] },
+      { input: 'string', needs: ['alpha'] }
     ]);
   });
 

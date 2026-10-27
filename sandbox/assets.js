@@ -1,7 +1,7 @@
 // The sandbox as JavaScript: the same actions as assets.json, called one by one through the public API.
 // Run: npm run sandbox:js
 
-import { atlas, audio, audiosprite, copy, formatReport, image, json, xml } from '../dist/index.js';
+import { atlas, audio, audiosprite, copy, formatReport, gltf, image, json, xml } from '../dist/index.js';
 
 const source = 'tests/assets';
 const destination = 'sandbox/compiled-js';
@@ -41,9 +41,28 @@ async function main() {
       format: 'ogg',
       json: 'phaser'
     }),
-    // "#rest" exists only in a build; here the folders handled above are excluded by hand
+    await gltf.process({ source: `${source}/models/crate`, destination: `${destination}/models/crate`, format: 'glb' }),
+    await gltf.process({
+      source: `${source}/models/crate.glb`,
+      destination: `${destination}/models/extracted`,
+      textures: { extract: true, format: 'webp' }
+    }),
+    await gltf.process({
+      source: `${source}/models/sphere.glb`,
+      destination: { folder: `${destination}/models/lods`, filename: '[name]_lod0' }
+    }),
+    await gltf.process({
+      source: `${source}/models/sphere.glb`,
+      destination: { folder: `${destination}/models/lods`, filename: '[name]_lod1' },
+      simplify: { ratio: 0.25 }
+    }),
+    // "#rest" exists only in a build; here the folders handled above are excluded by hand. The crate's texture
+    // belongs to its .gltf, so models are left out too
     await image.process({
-      source: { include: source, exclude: [`${source}/sprites`, `${source}/tiles`, `${source}/images/ui/icons`] },
+      source: {
+        include: source,
+        exclude: [`${source}/sprites`, `${source}/tiles`, `${source}/images/ui/icons`, `${source}/models`]
+      },
       destination
     }),
     await copy.process({

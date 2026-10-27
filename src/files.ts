@@ -42,6 +42,8 @@ export interface SelectOptions {
   exclude?: SourcePattern | SourcePattern[];
   /** Drops a file by its origin before anything is read. Build uses it for `#rest`. */
   skip?: (origin: string) => boolean;
+  /** The action's search for the files a selected file refers to; they are read into `file.companions`. */
+  findCompanions?: (file: AssetFile) => string[];
 }
 
 export interface Selection {
@@ -81,19 +83,27 @@ export async function selectFiles(source: Source | AssetFile[], options: SelectO
     if (options.skip?.(candidate.origin)) continue;
     if (accepts !== '*' && !accepts.includes(extension(candidate.path))) continue;
 
+    // cheapest first: the size from the file system, then the facts; only a file that passes is read
+    let meta = candidate.file?.meta;
+    if (when) {
+      meta ??= { size: (await fs.stat(candidate.absolute as string)).size };
+      if (!when.testSize(meta.size)) continue;
+      const input = candidate.file?.data ?? (candidate.absolute as string);
+      if (!(await passesFacts(meta, when, options.probe, input, warnings))) continue;
+    }
     const data = candidate.file?.data ?? (await fs.readFile(candidate.absolute as string));
     const file: AssetFile = {
       ...candidate.file,
       path: stripFolder(candidate.path, selectedFrom),
       data,
-      meta: candidate.file?.meta ?? { size: data.length },
+      meta: meta ?? { size: data.length },
       origin: candidate.origin,
       // a folder outside the root would let an output placed by its source folder escape the destination
       selectedFrom: selectedFrom.startsWith('..') ? '' : selectedFrom
     };
-    if (when) {
-      await fillFacts(file, when.needs, options.probe, warnings);
-      if (!when.test(file.meta)) continue;
+    // files handed over from an earlier selection already carry their companions
+    if (options.findCompanions && !file.companions) {
+      file.companions = await readCompanions(candidate, options.findCompanions(file), root, pool);
     }
     files.push(file);
   }
@@ -165,6 +175,29 @@ function cleanPattern(pattern: unknown): string {
 function cleanFolderPath(folder: string): string {
   const clean = folder.replace(/^(\.\/)+/, '').replace(/\/+$/, '');
   return clean === '.' ? '' : clean;
+}
+
+// Reads exactly the paths the action's findCompanions named, relative to the file. A missing one is left out, so the
+// action can name the file it needed; a path that climbs above the root, or out of the files in memory, is never read.
+async function readCompanions(
+  candidate: Candidate,
+  references: string[],
+  root: string,
+  pool: AssetFile[] | undefined
+): Promise<AssetFile[]> {
+  const companions: AssetFile[] = [];
+  for (const reference of references) {
+    const relative = path.posix.normalize(join(dirname(candidate.path), toPosix(reference)));
+    if (relative.startsWith('..')) continue;
+    if (pool) {
+      const found = pool.find((file) => file.path === relative);
+      if (found) companions.push({ ...found, path: reference });
+      continue;
+    }
+    const data = await fs.readFile(path.resolve(root, relative)).catch(() => undefined);
+    if (data) companions.push({ path: reference, data, meta: { size: data.length }, origin: relative });
+  }
+  return companions;
 }
 
 /** The name of the folder the files have in common: the pattern's folder, or the virtual folder they were read from. */
@@ -292,9 +325,11 @@ async function walkFolder(
 // ---------------------------------------------------------------------------
 
 interface CompiledWhen {
-  /** Facts a probe has to supply before `test` can answer. */
+  /** Facts other than size, which a probe has to supply. */
   needs: string[];
-  test(meta: AssetMeta): boolean;
+  testSize(size: number): boolean;
+  /** The facts other than size; with `knownOnly`, those not known yet are skipped instead of failing. */
+  testFacts(meta: AssetMeta, knownOnly?: boolean): boolean;
 }
 
 const UNITS: Record<string, number> = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3, px: 1 };
@@ -310,13 +345,11 @@ const COMPARE: Record<string, (actual: number, target: number) => boolean> = {
 };
 
 function compileWhen(when: WhenSpec, warnings: string[]): CompiledWhen {
-  const checks: Array<(meta: AssetMeta) => boolean> = [];
-  const needs: string[] = [];
+  const checks: Array<{ key: string; check: (meta: AssetMeta) => boolean }> = [];
   for (const [key, value] of Object.entries(when)) {
     if (value === undefined) continue;
-    if (key !== 'size') needs.push(key);
     if (typeof value === 'boolean') {
-      checks.push((meta) => meta[key] === value);
+      checks.push({ key, check: (meta) => meta[key] === value });
       continue;
     }
     const tests = toArray(value).map((text) => parseComparison(String(text)));
@@ -325,12 +358,20 @@ function compileWhen(when: WhenSpec, warnings: string[]): CompiledWhen {
       warnings.push(`when.${key} ${bad}; ignored`);
       continue;
     }
-    checks.push((meta) => {
+    const check = (meta: AssetMeta) => {
       const actual = meta[key];
       return typeof actual === 'number' && (tests as Array<(n: number) => boolean>).every((test) => test(actual));
-    });
+    };
+    checks.push({ key, check });
   }
-  return { needs, test: (meta) => checks.every((check) => check(meta)) };
+  const sizeChecks = checks.filter(({ key }) => key === 'size');
+  const factChecks = checks.filter(({ key }) => key !== 'size');
+  return {
+    needs: [...new Set(Object.keys(when).filter((key) => key !== 'size' && when[key] !== undefined))],
+    testSize: (size) => sizeChecks.every(({ check }) => check({ size })),
+    testFacts: (meta, knownOnly) =>
+      factChecks.every(({ key, check }) => (knownOnly && meta[key] === undefined) || check(meta))
+  };
 }
 
 /** `">200kb"`, `">=1024"`, `"<2mb"`, `"512"` (bare number means equal). Returns a predicate, or a message when malformed. */
@@ -345,13 +386,25 @@ function parseComparison(text: string): ((n: number) => boolean) | string {
   return (actual) => compare(actual, target);
 }
 
-/** Fills the facts a `when` needs through the probe. Without one the file fails the `when`; warned once. */
-async function fillFacts(file: AssetFile, needs: string[], probe: Probe | undefined, warnings: string[]): Promise<void> {
-  const missing = needs.filter((fact) => file.meta[fact] === undefined);
-  if (!missing.length) return;
-  if (probe) Object.assign(file.meta, await probe(file.data));
-  const unknown = missing.filter((fact) => file.meta[fact] === undefined);
-  if (!unknown.length) return;
-  const note = `when.${unknown.join(', when.')} cannot be determined for these files; they failed this "when"`;
-  if (!warnings.includes(note)) warnings.push(note);
+// The cheap facts come first and are checked at once, so a file they rule out never pays for the expensive ones; then
+// the probe works out only the facts still missing. A fact nothing can tell fails the file, warned once.
+async function passesFacts(
+  meta: AssetMeta,
+  when: CompiledWhen,
+  probe: Probe | undefined,
+  input: Buffer | string,
+  warnings: string[]
+): Promise<boolean> {
+  const missing = () => when.needs.filter((fact) => meta[fact] === undefined);
+  if (missing().length && probe) {
+    Object.assign(meta, await probe(input, 'cheap', meta));
+    if (!when.testFacts(meta, true)) return false;
+    if (missing().length) Object.assign(meta, await probe(input, missing(), meta));
+  }
+  const unknown = missing();
+  if (unknown.length) {
+    const note = `when.${unknown.join(', when.')} cannot be determined for these files; they failed this "when"`;
+    if (!warnings.includes(note)) warnings.push(note);
+  }
+  return when.testFacts(meta);
 }

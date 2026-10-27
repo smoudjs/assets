@@ -65,7 +65,11 @@ async function processWithTransform(
 ): Promise<ActionResult> {
   const started = performance.now();
   const options = resolveOptions(action.options, input);
-  const selection = await selectFiles(source, { accepts: action.accepts, probe: action.probe });
+  const selection = await selectFiles(source, {
+    accepts: action.accepts,
+    probe: action.probe,
+    findCompanions: action.findCompanions
+  });
   const files = selection.files;
   const context: TransformContext = {
     folderName: selection.folderName,
@@ -188,10 +192,18 @@ function cacheKeyFor(
   return cacheKey([action.name, action.version, options, context, inputs.map(describeInput)]);
 }
 
-// everything about an input that can change what comes out; `meta` is left out because it is read from the bytes
+// everything about an input that can change what comes out; `meta` is left out because it is read from the bytes.
+// Companions count too: a changed texture of a .gltf must not bring back the old result
 function describeInput(file: AssetFile): unknown {
-  const { path: filePath, origin, selectedFrom, filenameTokens } = file;
-  return { path: filePath, origin, selectedFrom, filenameTokens, hash: contentHash(file.data) };
+  const { path: filePath, origin, selectedFrom, filenameTokens, companions } = file;
+  return {
+    path: filePath,
+    origin,
+    selectedFrom,
+    filenameTokens,
+    hash: contentHash(file.data),
+    companions: companions?.map((companion) => ({ path: companion.path, hash: contentHash(companion.data) }))
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +402,10 @@ export async function finishAction(outcome: ActionOutcome): Promise<ActionResult
   }
 
   const inputsByOrigin = new Map(inputs.map((file) => [file.origin ?? file.path, file]));
-  const bytesIn = inputs.reduce((total, file) => total + file.meta.size, 0);
+  // a file's companions are part of what came in, like the .bin and textures of a .gltf
+  const sizeIn = (file: AssetFile) =>
+    file.meta.size + (file.companions ?? []).reduce((total, companion) => total + companion.data.length, 0);
+  const bytesIn = inputs.reduce((total, file) => total + sizeIn(file), 0);
   const rows = new Map<string, FileResult>();
   for (const output of outputs) {
     // group outputs, like atlas pages, have no origin: they share one row that stands for every input
@@ -401,7 +416,7 @@ export async function finishAction(outcome: ActionOutcome): Promise<ActionResult
       row = {
         source: output.origin ?? `${inputs.length} files`,
         outputs: [],
-        bytesIn: output.origin === undefined ? bytesIn : (input?.meta.size ?? 0),
+        bytesIn: output.origin === undefined ? bytesIn : input ? sizeIn(input) : 0,
         bytesOut: 0,
         keptOriginal: false
       };

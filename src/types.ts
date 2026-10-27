@@ -104,6 +104,11 @@ export interface AssetFile {
   filenameTokens?: Record<string, string | number>;
   /** The original bytes were kept because the processed result would have been bigger. */
   keptOriginal?: boolean;
+  /**
+   * Files this one refers to, read along with it when its action has `findCompanions`, like the `.bin` and textures
+   * of a `.gltf`. Each `path` is the reference as `findCompanions` returned it. Set by `selectFiles`.
+   */
+  companions?: AssetFile[];
 }
 
 // ---------------------------------------------------------------------------
@@ -132,8 +137,16 @@ export interface OptionDescriptor {
 
 export type OptionTable = Record<string, OptionDescriptor>;
 
-/** Reads facts out of a file's bytes so a `when` can filter on them. */
-export type Probe = (data: Buffer) => Promise<Partial<AssetMeta>>;
+/**
+ * Reads facts out of a file so a `when` can filter on them. Gets the file's path when it is on disk, so it reads only
+ * what it needs, or its bytes when it is in memory. `needs` is `'cheap'` for whatever this kind of file gives cheaply,
+ * or a list of facts to work out even if they are expensive. `known` holds the facts found so far, not to read again.
+ */
+export type Probe = (
+  input: string | Buffer,
+  needs: 'cheap' | string[],
+  known: Partial<AssetMeta>
+) => Promise<Partial<AssetMeta>>;
 
 /** What every `process` takes, next to the action's own options: `process({ source, destination, quality: 80 })`. */
 export interface ProcessParams {
@@ -198,6 +211,12 @@ export interface ActionDefinition<O extends Record<string, unknown> = Record<str
   options: OptionTable;
   /** Optional: answers `when` keys other than `size`. */
   probe?: Probe;
+  /**
+   * Optional: the action's own search for the files a selected file refers to, as paths relative to it, like the
+   * `.bin` and textures named inside a `.gltf`. They are read along with it into `file.companions`, and no `#rest`
+   * takes them.
+   */
+  findCompanions?(file: AssetFile): string[];
   /** All selected files in, all outputs out. A throw fails the action. */
   transform?(files: AssetFile[], options: O, context: TransformContext): Promise<AssetFile[] | TransformResult>;
   /** Source, destination and options in, the full result out. Added by `register` unless you write it. */

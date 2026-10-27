@@ -109,8 +109,8 @@ export const audiosprite: AudioSpriteAction = {
   accepts: audio.accepts,
   options,
 
-  probe(data) {
-    return audio.readAudioMeta(data);
+  probe(input) {
+    return audio.readAudioMeta(input);
   },
 
   async packAudioSprite(sounds, input = {}) {
