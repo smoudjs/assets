@@ -131,12 +131,18 @@ describe('core', () => {
     assert.deepEqual(await outputs(), []);
   });
 
-  it('strict turns warnings into failure', async () => {
-    const relaxed = await run({ actions: [{ action: 'copy', source: 'nothing-here' }] });
+  it('strict turns warnings into failure, and a strict failure writes nothing', async () => {
+    const actions = [
+      { action: 'copy', source: 'data' },
+      { action: 'copy', source: 'nothing-here' }
+    ];
+    const relaxed = await run({ actions });
     assert.equal(relaxed.result.ok, true);
     assert.match(relaxed.result.warnings[0], /selected no files/);
-    const strict = await run({ actions: [{ action: 'copy', source: 'nothing-here' }] }, { strict: true });
+    assert.ok((await relaxed.outputs()).length > 0);
+    const strict = await run({ actions }, { strict: true });
     assert.equal(strict.result.ok, false);
+    assert.deepEqual(await strict.outputs(), []);
   });
 
   it('warns when a catch-all overlaps another action', async () => {

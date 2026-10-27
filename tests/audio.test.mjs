@@ -123,6 +123,12 @@ describe('audio: never raise', () => {
     assert.equal(output.keptOriginal, false);
     assert.ok(output.meta.bitrate <= 70, `bitrate ${output.meta.bitrate}`);
   });
+
+  it('keepSmaller never returns the original when fewer channels or a lower rate were asked for', async () => {
+    // stereo 64k → mono at the same 64k comes out about as big, yet mono was asked for
+    const { read } = await run({ actions: [{ action: 'audio', source: 'audio/music/intro.mp3', channels: 1 }] });
+    assert.equal((await facts(await read('audio/music/intro.mp3'))).channels, 1);
+  });
 });
 
 describe('audio: cache and failures', () => {

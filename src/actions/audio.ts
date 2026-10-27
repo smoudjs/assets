@@ -112,7 +112,7 @@ const options: OptionTable = {
 export const audio: AudioAction = {
   name: 'audio',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 2,
+  version: 3,
   cache: true,
   accepts: ['mp3', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'wav', 'flac', 'webm'],
   options,
@@ -191,7 +191,9 @@ export const audio: AudioAction = {
         outputPath
       ]);
       const encoded = await fs.readFile(outputPath);
-      if (options.keepSmaller && format === sourceFormat && encoded.length >= data.length) return original;
+      // only a plain re-encode may fall back to the original: fewer channels or a lower rate asked for must be kept
+      const sameShape = format === sourceFormat && channels === source.channels && sampleRate === source.sampleRate;
+      if (options.keepSmaller && sameShape && encoded.length >= data.length) return original;
 
       return {
         data: encoded,

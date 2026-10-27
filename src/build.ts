@@ -120,8 +120,10 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
   }
   warnOverlaps(state);
 
+  // a strict build fails on warnings too, so it decides before anything reaches the destination
+  const failed = result.errors.length > 0 || (Boolean(options.strict) && result.warnings.length > 0);
   if (!result.dryRun) {
-    if (result.errors.length) await removePath(staging);
+    if (failed) await removePath(staging);
     else await commitStaging(staging, config.destination, state.produced, config.clean);
   }
   return finishBuild(result, started, options);
