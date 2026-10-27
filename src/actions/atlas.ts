@@ -12,7 +12,6 @@ type PageFormat = 'png' | 'jpeg' | 'webp' | 'avif';
 const EXTENSIONS: Record<PageFormat, string> = { png: '.png', jpeg: '.jpg', webp: '.webp', avif: '.avif' };
 
 export interface AtlasOptions extends Record<string, unknown> {
-  name?: string;
   maxWidth: number;
   maxHeight: number;
   padding: number;
@@ -66,7 +65,6 @@ export interface AtlasAction extends ActionDefinition<AtlasOptions> {
 }
 
 const options: OptionTable = {
-  name: { kind: 'string', description: 'Atlas name. Default: the folder the sprites were selected from' },
   maxWidth: {
     kind: 'number',
     description: 'Widest page in px; sprites that do not fit go to a second page',
@@ -153,7 +151,8 @@ export const atlas: AtlasAction = {
     const fileOf = new Map(files.map((file) => [spriteName(file), file]));
     const errors = packed.errors.map(({ sprite, message }) => `${fileOf.get(sprite)?.origin ?? sprite}: ${message}`);
 
-    const name = options.name ?? (folderName || 'atlas');
+    // named after the folder; the destination's filename template renames it
+    const name = folderName || 'atlas';
     const pages = packed.pages.map((page, index) => {
       const stem = packed.pages.length > 1 ? `${name}_${index + 1}` : name;
       const image: AssetFile = {

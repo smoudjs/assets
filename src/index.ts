@@ -10,6 +10,8 @@
 
 import { actions } from './actions/index.js';
 import { atlas as atlasAction } from './actions/atlas.js';
+import { audio as audioAction } from './actions/audio.js';
+import { audiosprite as audiospriteAction } from './actions/audiosprite.js';
 import { copy as copyAction } from './actions/copy.js';
 import { image as imageAction } from './actions/image.js';
 import { json as jsonAction } from './actions/json.js';
@@ -18,6 +20,8 @@ import { xml as xmlAction } from './actions/xml.js';
 // the built-in actions; a new one is registered here
 export const image = actions.register(imageAction);
 export const atlas = actions.register(atlasAction);
+export const audio = actions.register(audioAction);
+export const audiosprite = actions.register(audiospriteAction);
 export const json = actions.register(jsonAction);
 export const xml = actions.register(xmlAction);
 export const copy = actions.register(copyAction);
@@ -38,6 +42,14 @@ export {
   type AtlasSprite,
   type PackedAtlas
 } from './actions/atlas.js';
+export { type AudioAction, type AudioOptions, type EncodedAudio } from './actions/audio.js';
+export {
+  type AudioSpriteAction,
+  type AudioSpriteEntry,
+  type AudioSpriteOptions,
+  type AudioSpriteSound,
+  type PackedAudioSprite
+} from './actions/audiosprite.js';
 export { type ImageAction, type ImageOptions, type OptimizedImage, type ResizeOptions } from './actions/image.js';
 export { type JsonAction } from './actions/json.js';
 export { type XmlAction, type XmlOptions } from './actions/xml.js';

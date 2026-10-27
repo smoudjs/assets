@@ -1,7 +1,8 @@
 {
   "defaults": {
     "image": { "quality": 60, "maxWidth": 2048, "maxHeight": 2048 },
-    "atlas": { "format": "webp", "quality": 60 }
+    "atlas": { "format": "webp", "quality": 60 },
+    "audio": { "format": "mp3", "bitrate": 64, "channels": 1 }
   },
   "actions": [
     { "action": "image", "source": { "include": "*.png", "when": { "size": ">300kb" } }, "format": "webp", "quality": 45 },
@@ -12,6 +13,7 @@
       "quality": 45
     },
     { "action": "image", "source": { "include": "#rest", "exclude": "*.svg" } },
+    "audio",
     "json",
     "xml",
     { "action": "copy", "source": "#rest" }

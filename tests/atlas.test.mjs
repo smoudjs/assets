@@ -78,11 +78,12 @@ describe('atlas', () => {
     }
   });
 
-  it('powerOfTwo rounds pages up, name and format pick the output files', async () => {
+  it('powerOfTwo rounds pages up, a filename template and format pick the output files', async () => {
     const { outputs, read } = await run({
-      actions: [{ action: 'atlas', source: 'tiles', powerOfTwo: true, format: 'webp', name: 'world' }]
+      actions: [{ action: 'atlas', source: 'tiles', powerOfTwo: true, format: 'webp', destination: { filename: 'world' } }]
     });
     assert.deepEqual(await outputs(), ['world.json', 'world.webp']);
+    assert.equal(JSON.parse(await read('world.json')).meta.image, 'world.webp');
     const { width, height, format } = await size(await read('world.webp'));
     assert.equal(format, 'webp');
     assert.ok(isPowerOfTwo(width) && isPowerOfTwo(height), `${width}x${height}`);

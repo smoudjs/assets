@@ -4,9 +4,11 @@
  *   node tests/assets/generate.mjs
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runFfmpeg } from '@smoud/ffmpeg';
 import sharp from 'sharp';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -158,6 +160,26 @@ await write('spine/hero/hero.skel', Buffer.from([0x53, 0x4b, 0x45, 0x4c, 0x00, 0
 
 // --- data: non-image files for copy and #rest ------------------------------------------------------
 
-await write('data/levels/level_01.json', Buffer.from(JSON.stringify({ width: 10, height: 8, tiles: [1, 2, 3] })));
-await write('data/levels/level_02.json', Buffer.from(JSON.stringify({ width: 12, height: 9, tiles: [3, 2, 1] })));
 await write('data/config.xml', Buffer.from('<?xml version="1.0"?>\n<game>\n  <title>Test</title>\n  <fps>60</fps>\n</game>\n'));
+
+// --- audio: sine tones, each under 20kb so size filters still see noise.png alone --------------------
+// music is longer and stereo, sfx short and mostly mono; every codec the audio action reads appears once
+
+/** A sine tone encoded by ffmpeg; `bitexact` keeps encoder names and random stream ids out of the bytes. */
+async function tone(relative, frequency, seconds, args) {
+  const output = path.join(os.tmpdir(), `smoud-tone${path.extname(relative)}`);
+  await runFfmpeg([
+    ...['-loglevel', 'error', '-f', 'lavfi', '-i', `sine=frequency=${frequency}:duration=${seconds}`],
+    ...['-map_metadata', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact', ...args, '-y', output]
+  ]);
+  await write(relative, await readFile(output));
+  await rm(output, { force: true });
+}
+
+await tone('audio/music/theme.ogg', 330, 3, ['-ac', '2', '-ar', '44100', '-c:a', 'libvorbis', '-b:a', '48k']);
+await tone('audio/music/intro.mp3', 262, 2, ['-ac', '2', '-ar', '44100', '-c:a', 'libmp3lame', '-b:a', '64k']);
+await tone('audio/sfx/click.wav', 1200, 0.2, ['-ac', '1', '-ar', '22050']);
+await tone('audio/sfx/coin.wav', 990, 0.1, ['-ac', '2', '-ar', '44100']);
+await tone('audio/sfx/jump.m4a', 520, 0.5, ['-ac', '1', '-ar', '44100', '-c:a', 'aac', '-b:a', '64k']);
+await tone('audio/sfx/hit.flac', 110, 0.3, ['-ac', '1', '-ar', '44100']);
+await tone('audio/sfx/laser.opus', 1760, 0.5, ['-ac', '1', '-c:a', 'libopus', '-b:a', '32k']);

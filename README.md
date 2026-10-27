@@ -6,7 +6,7 @@
 
 **One config. One command. All your game assets optimized.**
 
-`@smoud/assets` turns a folder of source assets into an optimized output folder. Images are resized, converted and compressed, sprites are packed into texture atlases, data files are minified, and everything else is copied. It is built for HTML5 games, WebGL and playable ads. The output is plain files that PixiJS, Phaser, Three.js, Cocos or your own loader can read.
+`@smoud/assets` turns a folder of source assets into an optimized output folder. Images are resized, converted and compressed, sprites are packed into texture atlases, sounds are converted and compressed, data files are minified, and everything else is copied. It is built for HTML5 games, WebGL and playable ads. The output is plain files that PixiJS, Phaser, Three.js, Cocos or your own loader can read.
 
 Use it two ways:
 
@@ -20,7 +20,7 @@ Use it two ways:
 - [The config file](#the-config-file)
   - [Presets](#presets)
 - [Command line](#command-line)
-- [Action reference](#action-reference): image, atlas, json, xml, copy
+- [Action reference](#action-reference): image, atlas, audio, audiosprite, json, xml, copy
 - [JavaScript API](#javascript-api)
   - [Your own actions](#your-own-actions)
 
@@ -28,6 +28,8 @@ Use it two ways:
 
 - 🖼️ **Images**: resize, trim, convert and compress with [Sharp](https://sharp.pixelplumbing.com). Try several formats and keep the smallest. A file never gets bigger.
 - 🧩 **Texture atlases**: MaxRects packing, trimming, extrusion, several pages, TexturePacker-compatible JSON.
+- 🔊 **Audio**: convert to mp3, ogg, opus or m4a, downmix to mono, resample, set the bitrate. Never raises the quality of a source.
+- 🎚️ **Audio sprites**: many sounds in one file, with a JSON for Howler, Phaser, PixiJS Sound or your own loader.
 - 📄 **Data files**: JSON and XML minified.
 - 🎯 **Explicit selection**: folders, globs, `#rest`, filters on size and image facts.
 - 🔗 **Chaining**: virtual `#folders` pass results from one action to the next, for example rasterize svg icons, then pack them.
@@ -100,9 +102,7 @@ assets/optimized/
   "defaults": {
     "image": { "quality": 80 }
   },
-  "actions": [
-    { "action": "atlas", "source": "sprites" }
-  ],
+  "actions": [{ "action": "atlas", "source": "sprites" }],
   "clean": true
 }
 ```
@@ -130,12 +130,12 @@ Each entry in `actions` is one step: which files, what to do, where to put the r
 { "action": "image", "source": "ui", "destination": "interface", "format": "webp", "quality": 80 }
 ```
 
-| Key           | What it does                                                                     |
-| ------------- | -------------------------------------------------------------------------------- |
-| `action`      | The action name: `image`, `atlas`, `json`, `xml`, `copy`, or one you registered. |
-| `source`      | Which files. Omitted: every file the action can handle.                          |
-| `destination` | Where the results go. Omitted: each result lands where its source was.           |
-| anything else | Options of the action, see [Action reference](#action-reference).                |
+| Key           | What it does                                                                                             |
+| ------------- | -------------------------------------------------------------------------------------------------------- |
+| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `json`, `xml`, `copy`, or one you registered. |
+| `source`      | Which files. Omitted: every file the action can handle.                                                  |
+| `destination` | Where the results go. Omitted: each result lands where its source was.                                   |
+| anything else | Options of the action, see [Action reference](#action-reference).                                        |
 
 A plain string is an action with default settings: `"image"` equals `{ "action": "image" }`.
 
@@ -172,7 +172,7 @@ An action only takes files it can handle. `image` never selects a `.json`, and `
 }
 ```
 
-**`when`** filters on facts about a file. `size` is known for every file. Other facts come from the action that selects: `image` knows `width`, `height`, `alpha` and `animated`.
+**`when`** filters on facts about a file. `size` is known for every file. Other facts come from the action that selects: `image` knows `width`, `height`, `alpha` and `animated`, and `audio` knows `duration`, `channels`, `sampleRate` and `bitrate`.
 
 | Fact       | Example                         | Meaning                                |
 | ---------- | ------------------------------- | -------------------------------------- |
@@ -181,6 +181,7 @@ An action only takes files it can handle. `image` never selects a `.json`, and `
 | `height`   | `"<512"`                        | Height in pixels.                      |
 | `alpha`    | `false`                         | Has transparency.                      |
 | `animated` | `true`                          | Has more than one frame.               |
+| `duration` | `">10"`                         | Length of a sound in seconds.          |
 
 Comparisons are `>`, `>=`, `<`, `<=`, `!=`, `=`, or a bare number for equality. In a list, every bound must hold. A fact the action cannot read excludes the file, with a warning.
 
@@ -260,9 +261,7 @@ A preset is a base config yours extends. It is a JSON file with only `defaults` 
   "defaults": {
     "image": { "quality": 60 }
   },
-  "actions": [
-    { "action": "atlas", "source": "sprites" }
-  ]
+  "actions": [{ "action": "atlas", "source": "sprites" }]
 }
 ```
 
@@ -276,11 +275,11 @@ The rules:
 
 **Built-in presets:**
 
-| Preset         | What it does                                                                                                                                                                                   |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default`      | Compresses images in their own format, minifies json and xml, copies everything else, svg included.                                                                                            |
-| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases default to quality 70. Then json, xml and copy like `default`. |
-| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas pages default to webp at quality 60.                                        |
+| Preset         | What it does                                                                                                                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `default`      | Compresses images in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                               |
+| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases default to quality 70. Sounds become mono mp3 at 96 kbps. Then json, xml and copy like `default`. |
+| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas pages default to webp at quality 60. Sounds become mono mp3 at 64 kbps.                                        |
 
 ### How a build runs
 
@@ -382,7 +381,6 @@ Packs images into one or more pages, with a JSON per page in the TexturePacker "
 
 | Option       | What it does                                                          | Default             |
 | ------------ | --------------------------------------------------------------------- | ------------------- |
-| `name`       | Name of the files: `name.png` and `name.json`.                        | the selected folder |
 | `maxWidth`   | Widest page in pixels. What does not fit goes to the next page.       | `2048`              |
 | `maxHeight`  | Tallest page in pixels.                                               | `2048`              |
 | `padding`    | Empty pixels between sprites and to the page edge.                    | `2`                 |
@@ -392,7 +390,7 @@ Packs images into one or more pages, with a JSON per page in the TexturePacker "
 | `format`     | Page format: `png`, `jpeg`, `webp`, `avif`.                           | `png`               |
 | `quality`    | 1 to 100. For png pages, setting it switches to palette compression.  | not set             |
 
-`"source": "sprites"` writes `sprites.png` and `sprites.json`. Frame names are the paths inside the selected folder without the extension, like `hero/idle_01`:
+`"source": "sprites"` writes `sprites.png` and `sprites.json`. `"destination": { "filename": "world" }` names them `world.png` and `world.json`. Frame names are the paths inside the selected folder without the extension, like `hero/idle_01`:
 
 ```json
 {
@@ -418,6 +416,71 @@ Good to know:
 - The same input always gives identical bytes. Frames are never rotated.
 - On a lossless png page, a frame cut back out equals the trimmed sprite pixel for pixel.
 
+### audio
+
+Converts, downmixes, resamples and compresses sounds. Takes `mp3`, `ogg`, `oga`, `opus`, `m4a`, `aac`, `wav`, `flac`, `webm`.
+
+```json
+{ "action": "audio", "source": "sfx", "format": "mp3", "bitrate": 64, "channels": 1 }
+```
+
+| Option        | What it does                                                                | Default       |
+| ------------- | --------------------------------------------------------------------------- | ------------- |
+| `format`      | `mp3`, `ogg`, `opus`, `m4a`, `wav`, `flac`.                                 | source format |
+| `quality`     | 1 to 100 for mp3, ogg, opus and m4a. Sounds about the same in every format. | `80`          |
+| `bitrate`     | 8 to 320 kbps, for mp3, ogg, opus and m4a. Wins over `quality`.             | none          |
+| `channels`    | `1` for mono, `2` for stereo.                                               | source        |
+| `sampleRate`  | `8000` to `48000` Hz, standard rates. opus always uses 48000.               | source        |
+| `keepSmaller` | Keep the original when encoding would not make it smaller.                  | `true`        |
+
+Good to know:
+
+- Channels, sample rate and bitrate never go up. With the same format and nothing to reduce, the original bytes are kept.
+- `quality` 80 gives 128 kbps for stereo mp3. Mono gets half, and ogg, m4a and opus get less for the same sound.
+- mp3 plays everywhere. ogg and opus are smaller, but older Safari cannot play them.
+- `"when": { "duration": ">10" }` separates music from sound effects.
+- Runs on ffmpeg through [@smoud/ffmpeg](https://www.npmjs.com/package/@smoud/ffmpeg). Set `FFMPEG_PATH` to use your own.
+
+### audiosprite
+
+Joins many sounds into one file with silence between them, plus a JSON that tells the player where each sound is. Takes the same files as `audio`.
+
+```json
+{ "action": "audiosprite", "source": "sfx", "channels": 1, "quality": 60 }
+```
+
+`"source": "sfx"` writes `sfx.mp3` and `sfx.json`. `"destination": { "filename": "effects" }` names them `effects.mp3` and `effects.json`:
+
+```json
+{ "src": ["sfx.mp3"], "sprite": { "click": [0, 200], "coin": [450, 100], "ui/close": [800, 350] } }
+```
+
+| Option       | What it does                                                          | Default             |
+| ------------ | --------------------------------------------------------------------- | ------------------- |
+| `format`     | `mp3`, `ogg`, `opus`, `m4a`, `wav`.                                   | `mp3`               |
+| `quality`    | 1 to 100, as in [audio](#audio).                                      | `80`                |
+| `bitrate`    | 8 to 320 kbps. Wins over `quality`.                                   | none                |
+| `channels`   | `1` or `2`. Never more than the sounds have.                          | from the sounds     |
+| `sampleRate` | As in [audio](#audio). Never above the sounds.                        | from the sounds     |
+| `gap`        | Seconds of silence between sounds, so one never bleeds into the next. | `0.25`              |
+| `json`       | Layout of the JSON, see the table below.                              | `howler`            |
+
+`json` layouts:
+
+| Value     | What it writes                                                                                  | Times in |
+| --------- | ----------------------------------------------------------------------------------------------- | -------- |
+| `howler`  | Howler 2: `{ src: [file], sprite: { name: [start, duration] } }`                                | ms       |
+| `howler1` | Howler 1: `{ urls: [file], sprite: { name: [start, duration] } }`                               | ms       |
+| `phaser`  | Phaser 3 `load.audioSprite`: `{ resources: [file], spritemap: { name: { start, end, loop } } }` | seconds  |
+| `pixi`    | PixiJS Sound `sound.add`: `{ url: file, sprites: { name: { start, end } } }`                    | seconds  |
+| `raw`     | Your own loader: `{ file, sounds: { name: { start, duration } } }`                              | seconds  |
+
+Good to know:
+
+- Sound names are the paths inside the folder without the extension, like `ui/close`.
+- Channels and sample rate come from the sounds, never higher.
+- Looping is set in the game, not in the JSON.
+
 ### json
 
 Minifies JSON files. An invalid file is an error. No options.
@@ -437,7 +500,20 @@ Copies files unchanged. Takes every file. No options.
 ## JavaScript API
 
 ```js
-import { actions, image, atlas, json, xml, copy, build, selectFiles, writeFiles, formatReport } from '@smoud/assets';
+import {
+  actions,
+  image,
+  atlas,
+  audio,
+  audiosprite,
+  json,
+  xml,
+  copy,
+  build,
+  selectFiles,
+  writeFiles,
+  formatReport
+} from '@smoud/assets';
 ```
 
 CommonJS works the same with `require('@smoud/assets')`.
@@ -487,17 +563,28 @@ const packed = await atlas.packAtlas(
   ],
   { padding: 2 }
 );
+const mp3 = await audio.encodeAudio(wavBuffer, { format: 'mp3', bitrate: 96 });
+const sprite = await audiosprite.packAudioSprite(
+  [
+    { name: 'click', data: clickWav },
+    { name: 'coin', data: coinWav }
+  ],
+  { gap: 0.5 }
+);
 const small = json.minifyJson(jsonBuffer);
 const tight = xml.minifyXml(xmlBuffer, { comments: false });
 ```
 
-| Function                             | Returns                                                                                                                    |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `image.optimizeImage(data, options)` | `{ data, format, width, height, alpha, animated, keptOriginal, warnings }`, or `null` for an svg without a `format`.       |
-| `image.readImageMeta(data)`          | `{ format, width, height, alpha, animated }`                                                                               |
-| `atlas.packAtlas(sprites, options)`  | `{ pages, warnings, errors }`. Each page is `{ image, width, height, frames }`. `errors` lists sprites that were left out. |
-| `json.minifyJson(data)`              | A buffer. Throws on invalid JSON.                                                                                          |
-| `xml.minifyXml(data, options)`       | A buffer.                                                                                                                  |
+| Function                                       | Returns                                                                                                                                         |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `image.optimizeImage(data, options)`           | `{ data, format, width, height, alpha, animated, keptOriginal, warnings }`, or `null` for an svg without a `format`.                            |
+| `image.readImageMeta(data)`                    | `{ format, width, height, alpha, animated }`                                                                                                    |
+| `audio.encodeAudio(data, options)`             | `{ data, format, duration, channels, sampleRate, bitrate, keptOriginal }`, or `null` for a codec with no matching format and no `format` given. |
+| `audio.readAudioMeta(data)`                    | `{ format, duration, channels, sampleRate, bitrate }`                                                                                           |
+| `atlas.packAtlas(sprites, options)`            | `{ pages, warnings, errors }`. Each page is `{ image, width, height, frames }`. `errors` lists sprites that were left out.                      |
+| `audiosprite.packAudioSprite(sounds, options)` | `{ data, format, duration, channels, sampleRate, bitrate, sounds }`. Each sound is `{ name, start, duration }`, in ms.                          |
+| `json.minifyJson(data)`                        | A buffer. Throws on invalid JSON.                                                                                                               |
+| `xml.minifyXml(data, options)`                 | A buffer.                                                                                                                                       |
 
 ### Find and write files
 

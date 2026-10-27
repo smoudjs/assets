@@ -1,7 +1,7 @@
 // The sandbox as JavaScript: the same actions as assets.json, called one by one through the public API.
 // Run: npm run sandbox:js
 
-import { atlas, copy, formatReport, image, json, xml } from '../dist/index.js';
+import { atlas, audio, audiosprite, copy, formatReport, image, json, xml } from '../dist/index.js';
 
 const source = 'tests/assets';
 const destination = 'sandbox/compiled-js';
@@ -23,6 +23,24 @@ async function main() {
     }),
     icons,
     await atlas.process({ source: icons.outputs, destination, padding: 4 }),
+    await audio.process({
+      source: { include: `${source}/audio/music`, when: { duration: '>1' } },
+      destination: `${destination}/audio/music`,
+      format: 'ogg',
+      quality: 70
+    }),
+    await audiosprite.process({
+      source: `${source}/audio/sfx`,
+      destination: `${destination}/audio`,
+      channels: 1,
+      quality: 60
+    }),
+    await audiosprite.process({
+      source: `${source}/audio/sfx`,
+      destination: { folder: `${destination}/audio`, filename: '[name]-phaser[ext]' },
+      format: 'ogg',
+      json: 'phaser'
+    }),
     // "#rest" exists only in a build; here the folders handled above are excluded by hand
     await image.process({
       source: { include: source, exclude: [`${source}/sprites`, `${source}/tiles`, `${source}/images/ui/icons`] },
