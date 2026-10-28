@@ -54,7 +54,8 @@ describe('meshopt', () => {
     const files = await outputs();
     assert.equal(files.length, 1, files.join(', '));
     const json = modelJson(await read(files[0]));
-    assert.equal(json.meshes.length, 1, 'gltf merged the meshes first');
+    const positions = json.meshes.map((mesh) => mesh.primitives[0].attributes.POSITION);
+    assert.equal(positions[0], positions[1], 'gltf shared the identical geometry first');
     assert.ok(json.extensionsUsed.includes('EXT_meshopt_compression'));
   });
 

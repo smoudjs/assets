@@ -1,6 +1,6 @@
 {
   "defaults": {
-    "image": { "quality": 60, "maxWidth": 2048, "maxHeight": 2048 },
+    "image": { "quality": 60, "maxWidth": 2048, "maxHeight": 2048, "webp": { "alphaQuality": 80 } },
     "atlas": { "format": "webp", "quality": 60 },
     "audio": { "format": "mp3", "bitrate": 64, "channels": 1 },
     "gltf": { "normals": false, "textures": { "extract": true, "format": "webp", "quality": 60, "maxWidth": 2048, "maxHeight": 2048 } },

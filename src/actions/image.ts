@@ -3,7 +3,7 @@
 import sharp, { type Metadata, type OutputInfo, type Sharp } from 'sharp';
 import type { ActionDefinition, AssetMeta, OptionTable } from '../types.js';
 import { resolveOptions, transformFiles } from './index.js';
-import { extension } from '../utils/fs.js';
+import { basename, extension } from '../utils/fs.js';
 
 type Format = 'png' | 'jpeg' | 'webp' | 'avif' | 'gif';
 const FORMATS: Format[] = ['png', 'jpeg', 'webp', 'avif', 'gif'];
@@ -338,6 +338,10 @@ export const image: ImageAction = {
       const { data, format, width, height, alpha, animated, keptOriginal } = optimized;
       const path =
         format === formatOfExtension(file.path) ? file.path : file.path.replace(/\.[^./]+$/, '') + EXTENSIONS[format];
+      // a file whose extension does not match its bytes gets the right one; the game still asks for the old name
+      if (options.format === undefined && path !== file.path) {
+        warnings.push(`${name} is a ${format}; written as ${basename(path)}, update references to it`);
+      }
       return { ...file, path, data, meta: { ...file.meta, format, width, height, alpha, animated }, keptOriginal };
     });
     return { outputs, warnings, errors };

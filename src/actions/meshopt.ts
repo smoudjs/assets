@@ -58,6 +58,7 @@ export const meshopt: MeshoptAction = {
       data: written.data,
       format,
       files: written.files,
+      keptOriginal: false,
       triangles: meta.triangles as number,
       vertices: meta.vertices as number,
       textures: meta.textures as number,

@@ -153,7 +153,8 @@ async function transformEachFile(
           const output = result.outputs.length === 1 ? result.outputs[0] : undefined;
           if (output && output.path === file.path && !file.companions?.length && !output.data.equals(file.data)) {
             const outputAsInput = { ...file, data: output.data };
-            await writeCache(cacheKeyFor(action, options, context, [outputAsInput]), { outputs: [output], warnings: [] });
+            const unchanged = { ...output, keptOriginal: true };
+            await writeCache(cacheKeyFor(action, options, context, [outputAsInput]), { outputs: [unchanged], warnings: [] });
           }
         }
         results[index] = result;

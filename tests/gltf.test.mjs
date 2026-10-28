@@ -14,6 +14,30 @@ function modelJson(data) {
 }
 const attributes = (json) => Object.keys(json.meshes[0].primitives[0].attributes).sort();
 
+/**
+ * A .glb as game code uses it: a named node with a mesh, scaled and moved, an empty child node as an anchor, and UVs
+ * on a material without a texture, for a texture the game assigns at runtime.
+ */
+async function untexturedModel() {
+  const { Document, NodeIO } = await import('@gltf-transform/core');
+  const doc = new Document();
+  const buffer = doc.createBuffer();
+  const accessor = (type, array) => doc.createAccessor().setType(type).setArray(array).setBuffer(buffer);
+  const primitive = doc
+    .createPrimitive()
+    .setAttribute('POSITION', accessor('VEC3', new Float32Array([0, 0, 0, 10, 0, 0, 0, 10, 0])))
+    .setAttribute('TEXCOORD_0', accessor('VEC2', new Float32Array([0, 0, 1, 0, 0, 1])))
+    .setMaterial(doc.createMaterial('paint'));
+  const body = doc
+    .createNode('body')
+    .setMesh(doc.createMesh('body').addPrimitive(primitive))
+    .setTranslation([5, 0, 0])
+    .setScale([2, 2, 2])
+    .addChild(doc.createNode('hand_socket').setTranslation([0, 1, 0]));
+  doc.createScene().addChild(body);
+  return Buffer.from(await new NodeIO().writeBinary(doc));
+}
+
 describe('gltf: forms and companions', () => {
   it('a .gltf keeps its form: JSON, .bin and texture under their source names, the JSON naming both', async () => {
     const { result, outputs, read } = await run({ actions: [{ action: 'gltf', source: 'models/crate' }] });
@@ -74,15 +98,55 @@ describe('gltf: forms and companions', () => {
 });
 
 describe('gltf: cleanup and removals', () => {
-  it('cleans up duplicates and unused parts and quantizes, unless quantize is off', async () => {
+  it('cleans up unused parts and shares duplicate geometry, keeping named parts; quantizes only when asked', async () => {
     const { read } = await run({ actions: [{ action: 'gltf', source: 'models/crate.glb' }] });
     const json = modelJson(await read('models/crate.glb'));
-    assert.equal(json.materials.length, 1, 'the identical and the unused material are gone');
-    assert.equal(json.meshes.length, 1, 'the identical meshes are merged');
-    assert.deepEqual(json.extensionsUsed, ['KHR_mesh_quantization']);
+    assert.deepEqual(
+      json.materials.map((material) => material.name),
+      ['wood-0', 'wood-1'],
+      'the unused material is gone, the named copies stay'
+    );
+    assert.equal(json.meshes.length, 2, 'the named meshes stay');
+    const positions = json.meshes.map((mesh) => mesh.primitives[0].attributes.POSITION);
+    assert.equal(positions[0], positions[1], 'the identical meshes share one copy of their geometry');
+    assert.equal(json.extensionsUsed, undefined);
 
-    const plain = await run({ actions: [{ action: 'gltf', source: 'models/crate.glb', quantize: false }] });
-    assert.equal(modelJson(await plain.read('models/crate.glb')).extensionsUsed, undefined);
+    const quantized = await run({ actions: [{ action: 'gltf', source: 'models/crate.glb', quantize: true }] });
+    assert.deepEqual(modelJson(await quantized.read('models/crate.glb')).extensionsUsed, ['KHR_mesh_quantization']);
+  });
+
+  it('by default changes nothing game code relies on: nodes, names, UVs, empty nodes, float positions', async () => {
+    const json = modelJson((await gltf.optimizeGltf({ data: await untexturedModel() })).data);
+    assert.equal(json.extensionsRequired, undefined, 'no KHR_mesh_quantization');
+    assert.equal(
+      json.accessors[json.meshes[0].primitives[0].attributes.POSITION].componentType,
+      5126,
+      'positions stay float'
+    );
+    assert.ok('TEXCOORD_0' in json.meshes[0].primitives[0].attributes, 'UVs stay without a texture');
+    assert.deepEqual(
+      json.nodes
+        .map(({ name, translation, scale, mesh }) => ({ name, translation, scale, mesh }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      [
+        { name: 'body', translation: [5, 0, 0], scale: [2, 2, 2], mesh: 0 },
+        { name: 'hand_socket', translation: [0, 1, 0], scale: undefined, mesh: undefined }
+      ],
+      'no node added, moved or dropped; the empty one stays'
+    );
+    assert.equal(json.meshes[0].name, 'body');
+  });
+
+  it('removeUnusedAttributes drops UVs no texture uses, but keeps those of textures being extracted', async () => {
+    const untextured = modelJson(
+      (await gltf.optimizeGltf({ data: await untexturedModel() }, { removeUnusedAttributes: true })).data
+    );
+    assert.deepEqual(attributes(untextured), ['POSITION']);
+
+    const { read } = await run({
+      actions: [{ action: 'gltf', source: 'models/crate.glb', removeUnusedAttributes: true, textures: { extract: true } }]
+    });
+    assert.ok(attributes(modelJson(await read('models/crate.glb'))).includes('TEXCOORD_0'));
   });
 
   it('normals, vertexColors, animations, uvs and materials go when turned off', async () => {
@@ -138,6 +202,38 @@ describe('gltf: textures and simplify', () => {
   });
 });
 
+describe('gltf: keepSmaller', () => {
+  it('a model cleanup cannot shrink comes back byte for byte, reported as kept', async () => {
+    const assets = await scratchAssets();
+    const cleaned = await gltf.optimizeGltf({ data: await readFile(path.join(ASSETS, 'models/crate.glb')) });
+    await assets.write('models/crate.glb', cleaned.data);
+
+    const { result, read } = await run({ source: assets.dir, actions: [{ action: 'gltf', source: 'models/crate.glb' }] });
+    assert.equal(result.actions[0].files[0].keptOriginal, true);
+    assert.deepEqual(await read('models/crate.glb'), cleaned.data);
+  });
+
+  it('options that cannot touch a model, like texture settings without textures, do not stop keepSmaller', async () => {
+    const sphere = (await gltf.optimizeGltf({ data: await readFile(path.join(ASSETS, 'models/sphere.glb')) })).data;
+    // the sphere has positions only: no textures, normals or UVs for these options to work on
+    const playable = { normals: false, uvs: false, textures: { extract: true, format: 'webp', maxWidth: 2048 } };
+    assert.equal((await gltf.optimizeGltf({ data: sphere }, playable)).keptOriginal, true);
+  });
+
+  it('an option set to a change, a new format or keepSmaller false always writes the new result', async () => {
+    const cleaned = (await gltf.optimizeGltf({ data: await readFile(path.join(ASSETS, 'models/crate.glb')) })).data;
+    assert.equal(
+      (await gltf.optimizeGltf({ data: cleaned }, { normals: true })).keptOriginal,
+      true,
+      'a default is no change'
+    );
+    assert.equal((await gltf.optimizeGltf({ data: cleaned }, { keepSmaller: false })).keptOriginal, false);
+    const embedded = await gltf.optimizeGltf({ data: cleaned }, { format: 'gltf-embedded' });
+    assert.equal(embedded.keptOriginal, false);
+    assert.equal(embedded.format, 'gltf-embedded');
+  });
+});
+
 describe('gltf: when, cache and failures', () => {
   it('readGltfMeta gives the same facts from a path, reading only the JSON part, as from the bytes', async () => {
     for (const file of ['models/crate.glb', 'models/sphere.glb', 'models/crate/crate.gltf']) {
@@ -185,16 +281,24 @@ describe('gltf: when, cache and failures', () => {
     assert.equal(changed.result.actions[0].fromCache, 0);
   });
 
-  it('a missing .bin and a corrupt .glb fail the build, named, and nothing is written', async () => {
+  it('a .gltf missing its .bin is copied as it is, with its texture and a warning', async () => {
     const assets = await scratchAssets();
     await assets.remove('models/crate/crate.bin');
+    const { result, outputs, read } = await run({
+      source: assets.dir,
+      actions: [{ action: 'gltf', source: 'models/crate' }]
+    });
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    assert.match(result.warnings.join('\n'), /crate\.gltf: a file it refers to is missing; copied as it is/);
+    assert.deepEqual(await outputs(), ['models/crate/crate.gltf', 'models/crate/crate.png']);
+    assert.deepEqual(await read('models/crate/crate.gltf'), await readFile(path.join(ASSETS, 'models/crate/crate.gltf')));
+  });
+
+  it('a corrupt .glb fails the build, named, and nothing is written', async () => {
+    const assets = await scratchAssets();
     await assets.write('models/broken.glb', 'this is not a model');
     const { result, outputs } = await run({ source: assets.dir, actions: [{ action: 'gltf', source: 'models' }] });
     assert.equal(result.ok, false);
-    assert.ok(
-      result.errors.some((e) => e.includes('crate.gltf') && e.includes('crate.bin is missing')),
-      result.errors.join('\n')
-    );
     assert.ok(
       result.errors.some((e) => e.includes('broken.glb')),
       result.errors.join('\n')

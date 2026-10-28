@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import sharp from 'sharp';
 import { actions, image } from '../dist/index.js';
@@ -200,6 +202,17 @@ describe('image: when and failures', () => {
       { input: 'string', needs: ['alpha'] },
       { input: 'string', needs: ['alpha'] }
     ]);
+  });
+
+  it('a png named .jpg gets the right extension, with a warning to update references', async () => {
+    const assets = await scratchAssets();
+    await assets.write('images/ui/mislabelled.jpg', await readFile(path.join(assets.dir, 'images/ui/logo.png')));
+    const { result, outputs } = await run({ source: assets.dir, actions: [{ action: 'image', source: 'images/ui' }] });
+    assert.ok((await outputs()).includes('images/ui/mislabelled.png'));
+    assert.match(
+      result.warnings.join('\n'),
+      /mislabelled\.jpg is a png; written as mislabelled\.png, update references to it/
+    );
   });
 
   it('a corrupt image fails the build and nothing is written', async () => {

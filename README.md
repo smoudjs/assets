@@ -4,14 +4,18 @@
 [![npm downloads](https://img.shields.io/npm/dw/@smoud/assets.svg)](https://www.npmjs.com/package/@smoud/assets)
 [![license](https://img.shields.io/npm/l/@smoud/assets.svg)](https://github.com/smoudjs/assets/blob/main/LICENSE)
 
-**One config. One command. All your game assets optimized.**
+**Optimize every game asset with one command.**
 
-`@smoud/assets` turns a folder of source assets into an optimized output folder. Images are resized, converted and compressed, sprites are packed into texture atlases, sounds are converted and compressed, or joined into audio sprites, 3D models are optimized and compressed, data files are minified, and everything else is copied. It is built for HTML5 games, WebGL and playable ads. The output is plain files that PixiJS, Phaser, Three.js, Cocos or your own loader can read.
+Images, sounds, 3D models, Spine and data files, each compressed with the right tool. Names and formats stay and no file ever grows, so your game code does not change.
 
-Use it two ways:
+```sh
+npm install --save-dev @smoud/assets
+npx smoud-assets build --source assets --destination assets
+```
 
-- **A JSON config** and one command, for the whole project.
-- **A JavaScript API**, for one action at a time, or for the raw functions behind them.
+Every file in `assets/` is replaced by its optimized version, so keep the originals in git.
+
+Making a playable ad? Add `--preset playable` or `--preset playable-max` to convert formats, downmix sounds and shrink textures. This saves up to a third of the asset size, see [typical results](#typical-results).
 
 ## Contents
 
@@ -37,17 +41,17 @@ Use it two ways:
 
 ## Features
 
-- 🖼️ **Images**: resize, trim, convert and compress with [Sharp](https://sharp.pixelplumbing.com). Try several formats and keep the smallest. A file never gets bigger.
-- 🧩 **Texture atlases**: MaxRects packing, trimming, extrusion, several pages, TexturePacker-compatible JSON.
-- 🔊 **Audio**: convert to mp3, ogg, opus or m4a, downmix to mono, resample, set the bitrate. Never raises the quality of a source.
-- 🎚️ **Audio sprites**: many sounds in one file, with a JSON for Howler, Phaser, PixiJS Sound or your own loader.
-- 🧊 **3D models**: clean up, simplify and quantize glTF and GLB, strip normals or materials, extract textures, meshopt compression.
-- 🦴 **Spine**: compress, convert and scale atlas pages with the `.atlas` rewritten to match, round skeleton numbers, keep or drop animations.
+- 🛡️ **Safe by default**: models keep their nodes, names and UVs, and a failed build leaves the previous output untouched.
+- ⚡ **One command**: works on any `assets/` folder as it is, ffmpeg included. Results are cached, so rebuilds skip unchanged files.
+- 📱 **Playable presets**: `playable` and `playable-max` convert formats, downmix sounds and shrink models for the smallest ad.
+- 🖼️ **Images**: [Sharp](https://sharp.pixelplumbing.com) with palette png, mozjpeg, webp and avif. Try several formats and keep the smallest.
+- 🧩 **Texture atlases**: MaxRects packing, trimming, extrusion, TexturePacker-compatible JSON.
+- 🔊 **Audio**: mp3, ogg, opus or m4a, mono downmix, bitrate by quality, never above the source. Audio sprites for Howler, Phaser and PixiJS Sound.
+- 🧊 **3D models**: [glTF Transform](https://gltf-transform.dev) and meshoptimizer: dedup, weld, prune, simplify, quantize, texture extraction, meshopt compression.
+- 🦴 **Spine**: pages compressed, converted and scaled with the `.atlas` rewritten, skeleton numbers rounded, animations filtered.
 - 📄 **Data files**: JSON and XML minified.
-- 🎯 **Explicit selection**: folders, globs, `#rest`, filters on size, image, sound and model facts.
-- 🔗 **Chaining**: virtual `#folders` pass results from one action to the next, for example rasterize svg icons, then pack them.
-- 🛡️ **Safe builds**: a failed build leaves the previous output untouched.
-- 🧰 **Toolkit**: every action and its raw function is available from code, and you can register your own.
+- 🎯 **Selection and chaining**: globs, `#rest`, filters on size, image, sound and model facts, virtual `#folders` between actions.
+- 🧰 **Toolkit**: a JSON config or the JavaScript API, every action's raw function, your own actions. Output is plain files for PixiJS, Phaser, Three.js, Cocos or your own loader.
 
 ## Quick start
 
@@ -303,6 +307,21 @@ The rules:
 | `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases and Spine pages use quality 70. Sounds become mono mp3 at 96 kbps. Models extract their textures. Then json, xml and copy like `default`.    |
 | `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas and Spine pages: webp, quality 60. Sounds become mono mp3 at 64 kbps. Models drop normals, textures become webp, models over 50,000 triangles are halved. |
 
+#### Typical results
+
+Approximate savings of each preset per genre, based on benchmarks of shipped playable ads. They count images, sounds, models and Spine files; fonts and code are copied as they are.
+
+| Game                     | Assets | `default` | `playable` | `playable-max` |
+| ------------------------ | ------ | --------- | ---------- | -------------- |
+| 2D match-3 with Spine    | 2 MB   | -12%      | -16%       | -35%           |
+| 2D merge                 | 3 MB   | -10%      | -18%       | -32%           |
+| 2D hidden objects        | 5 MB   | -14%      | -20%       | -38%           |
+| 2D slots                 | 4 MB   | -10%      | -15%       | -30%           |
+| 3D idle tycoon           | 6 MB   | -12%      | -16%       | -22%           |
+| 3D farm builder          | 3 MB   | -8%       | -17%       | -34%           |
+| 3D runner                | 4 MB   | -9%       | -14%       | -25%           |
+| 3D restaurant management | 4 MB   | -11%      | -15%       | -18%           |
+
 ### How a build runs
 
 1. Every action selects its files, top to bottom.
@@ -336,15 +355,11 @@ npx smoud-assets init [options]    # write a starter assets.json
 | `-h, --help`          | Show help.                                                     |
 | `-v, --version`       | Show the version.                                              |
 
-```sh
-npx smoud-assets build --preset default --source raw --destination public/assets
-```
-
 The exit code is `0` on success, `1` for a failed build, and `2` for a wrong command. Colours follow `NO_COLOR` and `FORCE_COLOR`.
 
 ### Examples
 
-Default optimization, no config needed. Takes `assets/` and writes to `assets/optimized/`. Every file keeps its name, format and size:
+Default optimization, no config needed. Takes `assets/` and writes to `assets/optimized/`. Every file keeps its name and format:
 
 ```sh
 npx smoud-assets build
@@ -415,7 +430,7 @@ Resizes, trims, converts and compresses images. Takes `png`, `jpg`, `jpeg`, `web
 Good to know:
 
 - avif has its own `quality` of 50, because avif reaches the same look at lower numbers. The top-level `quality` does not change it. Set `"avif": { "quality": 60 }` instead.
-- The extension follows the format. `jpeg` writes `.jpg`.
+- The extension follows the format. `jpeg` writes `.jpg`. A wrong extension, like a png named `.jpg`, is fixed with a warning.
 - jpeg cannot hold transparency. Without `flatten` it is painted on black, with a warning. In a format list, jpeg is skipped for transparent images.
 - svg sources need a raster `format`, otherwise they are skipped with a warning.
 - An animation converted to png, jpeg or avif keeps its first frame.
@@ -538,18 +553,20 @@ Optimizes glTF models, `.glb` and `.gltf`. Everything it writes loads in any eng
 { "action": "gltf", "source": "models", "normals": false, "textures": { "extract": true } }
 ```
 
-| Option         | What it does                                       | Default       |
-| -------------- | -------------------------------------------------- | ------------- |
-| `format`       | `glb`, `gltf` (separate files) or `gltf-embedded`. | as the source |
-| `quantize`     | Smaller vertex data, `KHR_mesh_quantization`.      | `true`        |
-| `simplify`     | Fewer triangles, see below.                        | none          |
-| `textures`     | Re-encode or extract textures, see below.          | as they are   |
-| `normals`      | `false` removes them; engines can compute them.    | `true`        |
-| `tangents`     | `false` removes them.                              | `true`        |
-| `uvs`          | `false` removes them, and the textures with them.  | `true`        |
-| `vertexColors` | `false` removes them.                              | `true`        |
-| `materials`    | `false` removes them, and the textures with them.  | `true`        |
-| `animations`   | `false` removes them.                              | `true`        |
+| Option                   | What it does                                                            | Default       |
+| ------------------------ | ----------------------------------------------------------------------- | ------------- |
+| `format`                 | `glb`, `gltf` (separate files) or `gltf-embedded`.                      | as the source |
+| `quantize`               | Smaller vertex data, `KHR_mesh_quantization`. See below.                | `false`       |
+| `simplify`               | Fewer triangles, see below.                                             | none          |
+| `textures`               | Re-encode or extract textures, see below.                               | as they are   |
+| `normals`                | `false` removes them; shading turns flat unless the game computes them. | `true`        |
+| `tangents`               | `false` removes them.                                                   | `true`        |
+| `uvs`                    | `false` removes them, and the textures with them.                       | `true`        |
+| `vertexColors`           | `false` removes them.                                                   | `true`        |
+| `materials`              | `false` removes them, and the textures with them.                       | `true`        |
+| `animations`             | `false` removes them.                                                   | `true`        |
+| `removeUnusedAttributes` | Remove vertex attributes no material uses, like UVs without a texture.  | `false`       |
+| `keepSmaller`            | Keep the original when cleanup alone would not make it smaller.         | `true`        |
 
 `simplify`:
 
@@ -580,7 +597,9 @@ Extracted textures can go on to another action through a virtual folder:
 Good to know:
 
 - A `.gltf` brings its `.bin` and textures, and no later action takes them. Put `gltf` before your image actions.
-- Cleanup always runs: unused and duplicate parts go and vertices are welded. It never changes how a model looks.
+- Cleanup always runs: unused parts go, identical geometry is shared and vertices are welded. Names, nodes, empty nodes and vertex attributes stay, so game code finds what it expects. When that alone does not make a model smaller, the original is kept.
+- `quantize` adds a scale and offset to the nodes. Code that reuses `mesh.geometry` without its node, like `InstancedMesh` or merged geometry, sees the model shrunk and moved.
+- `removeUnusedAttributes` judges by the materials in the file: the UVs of a model the game textures at runtime look unused and go. UVs of extracted textures always stay.
 - Extracted textures fit an atlas only when they do not repeat; the game maps the UVs onto the frame.
 - Reads meshopt-compressed models too, and always writes them uncompressed. For compression, see [meshopt](#meshopt).
 

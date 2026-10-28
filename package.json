@@ -1,7 +1,7 @@
 {
   "name": "@smoud/assets",
-  "version": "1.1.0",
-  "description": "One config. One command. All your game assets optimized. Image optimization, conversion, resizing, texture atlases, audio conversion, audio sprites, glTF model optimization and compression, Spine optimization and data minification for HTML5 games and playable ads.",
+  "version": "1.1.1",
+  "description": "Optimize every game asset with one command. Images, texture atlases, audio and audio sprites, glTF models with meshopt, Spine and JSON/XML, each compressed with the right tool. Names and formats stay, no file grows. Playable ad presets for HTML5 games.",
   "keywords": [
     "assets",
     "asset-pipeline",
@@ -36,6 +36,9 @@
     "html5",
     "game",
     "game-development",
+    "pixijs",
+    "phaser",
+    "threejs",
     "playable",
     "playable-ads",
     "cli"

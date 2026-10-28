@@ -3,6 +3,7 @@
 // are imported on first use, so builds without models never load them.
 
 import { promises as fs } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import type { Document } from '@gltf-transform/core';
 import { destinationPath } from '../files.js';
 import type { ActionDefinition, AssetFile, AssetMeta, OptionTable, TransformResult } from '../types.js';
@@ -39,6 +40,8 @@ export interface GltfOptions extends Record<string, unknown> {
   vertexColors: boolean;
   materials: boolean;
   animations: boolean;
+  removeUnusedAttributes: boolean;
+  keepSmaller: boolean;
 }
 
 /** A model going into `optimizeGltf`. */
@@ -66,6 +69,8 @@ export interface OptimizedGltf {
   data: Buffer;
   format: GltfFormat;
   files: GltfFile[];
+  /** The original model and its files came back, because cleaning up would not have made them smaller. */
+  keptOriginal: boolean;
   triangles: number;
   vertices: number;
   textures: number;
@@ -93,8 +98,10 @@ const options: OptionTable = {
   },
   quantize: {
     kind: 'boolean',
-    description: 'Store vertex data in smaller numbers (KHR_mesh_quantization); every engine loads it without a decoder',
-    default: true
+    description:
+      'Store vertex data in smaller numbers (KHR_mesh_quantization). Adds a scale and offset to the nodes, so code that ' +
+      'reuses mesh.geometry without its node sees the model shrunk and moved',
+    default: false
   },
   simplify: {
     kind: 'object',
@@ -136,14 +143,26 @@ const options: OptionTable = {
   uvs: keep('UVs; without them textures go too'),
   vertexColors: keep('vertex colors'),
   materials: keep('materials; without them textures go'),
-  animations: keep('animations')
+  animations: keep('animations'),
+  removeUnusedAttributes: {
+    kind: 'boolean',
+    description:
+      'Remove vertex attributes no material uses, like UVs on a material without a texture. ' +
+      'Breaks textures a game assigns at runtime',
+    default: false
+  },
+  keepSmaller: {
+    kind: 'boolean',
+    description: 'With every other option at its default, keep the original if cleaning up does not make it smaller',
+    default: true
+  }
 };
 
 /** Optimize glTF and GLB models: cleanup, removals, simplify, quantize and textures, all without a decoder. */
 export const gltf: GltfAction = {
   name: 'gltf',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 2,
+  version: 3,
   cache: true,
   accepts: ['glb', 'gltf'],
   options,
@@ -203,21 +222,72 @@ export const gltf: GltfAction = {
       .find((extension) => extension.extensionName === 'EXT_meshopt_compression');
     if (compression) compression.dispose();
 
+    // what this model has, read before anything is removed: an option that cannot touch the model, like texture
+    // settings on a model without textures, is no change to it
+    const root = doc.getRoot();
+    const semantics = root
+      .listMeshes()
+      .flatMap((mesh) => mesh.listPrimitives())
+      .flatMap((primitive) => primitive.listSemantics());
+    const has = (prefix: string) => semantics.some((semantic) => semantic.startsWith(prefix));
+    const applies: Record<string, boolean> = {
+      textures: root.listTextures().length > 0,
+      normals: has('NORMAL'),
+      tangents: has('TANGENT'),
+      uvs: has('TEXCOORD_'),
+      vertexColors: has('COLOR_'),
+      materials: root.listMaterials().length > 0,
+      animations: root.listAnimations().length > 0
+    };
+
     removeData(doc, options);
+    // the UVs of an extracted texture look unused once the texture leaves the model, so they stay
+    const extracting = options.textures.extract && doc.getRoot().listTextures().length > 0;
+    const keepAttributes = !options.removeUnusedAttributes || extracting;
     const extracted = await processTextures(doc, model.name ?? 'model', options, tools);
-    // extracted textures leave their UVs behind on purpose: the game puts the textures back
-    await doc.transform(functions.prune({ keepAttributes: options.textures.extract }), functions.dedup(), functions.weld());
+    // weld first, so the geometry dedup shares stays shared; dedup keeps named parts apart and prune keeps empty nodes
+    // and one-colour textures, since game code may look them up; prune last removes what the steps before left unused
+    await doc.transform(
+      functions.weld(),
+      functions.dedup({ keepUniqueNames: true }),
+      functions.prune({ keepAttributes, keepLeaves: true, keepSolidTextures: true })
+    );
     if (options.simplify.ratio !== undefined)
       await simplify(doc, options.simplify as Required<GltfOptions['simplify']>, tools);
     if (options.quantize) await doc.transform(functions.quantize());
     await doc.transform(functions.unpartition());
 
     const written = await writeDocument(doc, format, model, tools);
-    const meta = await gltf.readGltfMeta(written.data);
+    let data: Buffer = written.data;
+    let files = [...written.files, ...extracted];
+    let keptOriginal = false;
+    // a model only cleaned up, every option at its default or unable to touch it, gives way to its original when the
+    // result is not smaller, as images do. A compressed source is always written uncompressed, so it is never kept
+    const defaults = resolveOptions<GltfOptions>(gltf.options, {});
+    const onlyCleanedUp =
+      !compression &&
+      Object.entries(options).every(
+        ([key, value]) =>
+          key === 'keepSmaller' ||
+          (key === 'format' && value === sourceFormat) ||
+          applies[key] === false ||
+          isDeepStrictEqual(value, defaults[key])
+      );
+    const originalFiles = Object.entries(model.companions ?? {}).map(([name, bytes]) => ({ name, data: bytes }));
+    // the JSON of a .gltf names its files, so it can be kept only while the filename template leaves those names alone
+    const namesKept = originalFiles.every((file) => (model.fileName?.(file.name, file.data) ?? file.name) === file.name);
+    const size = (main: Buffer, extra: GltfFile[]) => extra.reduce((total, file) => total + file.data.length, main.length);
+    if (options.keepSmaller && onlyCleanedUp && namesKept && size(data, files) >= size(model.data, originalFiles)) {
+      data = model.data;
+      files = originalFiles;
+      keptOriginal = true;
+    }
+    const meta = await gltf.readGltfMeta(data);
     return {
-      data: written.data,
+      data,
       format,
-      files: [...written.files, ...extracted],
+      files,
+      keptOriginal,
       triangles: meta.triangles as number,
       vertices: meta.vertices as number,
       textures: meta.textures as number,
@@ -238,9 +308,26 @@ export async function transformModels(
 ): Promise<TransformResult> {
   // transformFiles keeps one output per input, so the files next to each model wait here and follow it
   const nextToModel = new Map<AssetFile, AssetFile[]>();
+  const warnings: string[] = [];
   const { outputs, errors } = await transformFiles(files, async (file) => {
     const name = basename(file.path).replace(/\.[^.]+$/, '');
     const folder = dirname(file.path);
+    const companions = file.companions ?? [];
+    // a .gltf missing a file it refers to is broken already: it goes out as it is, with the files that were found
+    if (gltf.findCompanions!(file).length > companions.length) {
+      warnings.push(`${file.origin ?? file.path}: a file it refers to is missing; copied as it is`);
+      const unchanged: AssetFile = { ...file, companions: undefined };
+      nextToModel.set(
+        unchanged,
+        companions.map((companion) => ({
+          ...unchanged,
+          path: join(folder, companion.path),
+          data: companion.data,
+          meta: { size: 0 }
+        }))
+      );
+      return unchanged;
+    }
     const optimized = await process({
       name,
       data: file.data,
@@ -249,13 +336,14 @@ export async function transformModels(
       fileName: (plainName, data) =>
         basename(destinationPath({ path: plainName, data, meta: { size: 0 } }, filenameTemplate))
     });
-    const { data, format, triangles, vertices, textures, animations } = optimized;
+    const { data, format, keptOriginal, triangles, vertices, textures, animations } = optimized;
     const modelFile: AssetFile = {
       ...file,
       companions: undefined,
       path: join(folder, `${name}${format === 'glb' ? '.glb' : '.gltf'}`),
       data,
-      meta: { ...file.meta, format, triangles, vertices, textures, animations }
+      meta: { ...file.meta, format, triangles, vertices, textures, animations },
+      keptOriginal
     };
     nextToModel.set(
       modelFile,
@@ -269,7 +357,7 @@ export async function transformModels(
     );
     return modelFile;
   });
-  return { outputs: outputs.flatMap((model) => [model, ...(nextToModel.get(model) ?? [])]), errors };
+  return { outputs: outputs.flatMap((model) => [model, ...(nextToModel.get(model) ?? [])]), warnings, errors };
 }
 
 export type GltfTransform = Awaited<ReturnType<typeof importGltfTransform>>;

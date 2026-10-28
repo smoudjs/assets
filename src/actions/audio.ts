@@ -115,7 +115,7 @@ const options: OptionTable = {
 export const audio: AudioAction = {
   name: 'audio',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 3,
+  version: 4,
   cache: true,
   accepts: ['mp3', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'wav', 'flac', 'webm'],
   options,
@@ -153,7 +153,9 @@ export const audio: AudioAction = {
       const sampleRate = format === 'opus' ? 48000 : Math.min(options.sampleRate ?? source.sampleRate, source.sampleRate);
       const sourceIsLossy = sourceFormat !== null && LOSSY_FORMATS.includes(sourceFormat);
       const wantedBitrate = options.bitrate ?? bitrateForQuality(options.quality, format, channels);
-      const cappedBitrate = sourceIsLossy && source.bitrate ? Math.min(wantedBitrate, source.bitrate) : wantedBitrate;
+      // a lossy source's bitrate is the most worth keeping per channel: downmixed to mono, half of it carries the sound
+      const sourceLimit = source.bitrate ? Math.round((source.bitrate * channels) / source.channels) : undefined;
+      const cappedBitrate = sourceIsLossy && sourceLimit ? Math.min(wantedBitrate, sourceLimit) : wantedBitrate;
       const bitrate = format === 'ogg' ? withinVorbisLimits(cappedBitrate, channels, sampleRate) : cappedBitrate;
       const original: EncodedAudio = {
         data,

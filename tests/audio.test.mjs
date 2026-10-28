@@ -125,9 +125,19 @@ describe('audio: never raise', () => {
   });
 
   it('keepSmaller never returns the original when fewer channels or a lower rate were asked for', async () => {
-    // stereo 64k → mono at the same 64k comes out about as big, yet mono was asked for
     const { read } = await run({ actions: [{ action: 'audio', source: 'audio/music/intro.mp3', channels: 1 }] });
     assert.equal((await facts(await read('audio/music/intro.mp3'))).channels, 1);
+  });
+
+  it('a stereo 64k mp3 downmixed to mono gets at most half the bitrate, so it comes out smaller', async () => {
+    // bitrate 96 is above the source's: the cap is the source bitrate per channel, 32k for one channel
+    const { result } = await run({
+      actions: [{ action: 'audio', source: 'audio/music/intro.mp3', channels: 1, bitrate: 96 }]
+    });
+    const [file] = result.actions[0].files;
+    const [output] = result.actions[0].outputs;
+    assert.ok(output.meta.bitrate <= 36, `bitrate ${output.meta.bitrate}`);
+    assert.ok(file.bytesOut < file.bytesIn, `${file.bytesIn} → ${file.bytesOut}`);
   });
 });
 
