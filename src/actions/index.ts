@@ -146,7 +146,16 @@ async function transformEachFile(
       report(done, file.origin ?? file.path);
       try {
         const result = await runTransform(action, [file], options, context);
-        if (key && !result.errors.length) await writeCache(key, result);
+        if (key && !result.errors.length) {
+          await writeCache(key, result);
+          // a file written over its source comes back next build as its own output: stored as giving itself, it is
+          // never compressed or resized twice
+          const output = result.outputs.length === 1 ? result.outputs[0] : undefined;
+          if (output && output.path === file.path && !file.companions?.length && !output.data.equals(file.data)) {
+            const outputAsInput = { ...file, data: output.data };
+            await writeCache(cacheKeyFor(action, options, context, [outputAsInput]), { outputs: [output], warnings: [] });
+          }
+        }
         results[index] = result;
       } catch (error) {
         results[index] = {

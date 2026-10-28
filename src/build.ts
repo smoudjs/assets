@@ -1,7 +1,7 @@
 // Runs a config: for every action select its files, call its `process` in memory, then place the outputs.
 // Nothing touches the destination while actions run: results go to `<destination>/.staging`; on success they
 // are moved into place and stale files removed, on any error the staging folder is deleted and the previous
-// output stays as it was. A dry run writes nothing at all.
+// output stays as it was. A dry run writes nothing at all. A destination equal to the source optimizes in place.
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -16,10 +16,12 @@ import {
   moveFile,
   removeEmptyFolders,
   removePath,
+  samePath,
   statOrNull,
   toPosix,
   writeFile
 } from './utils/fs.js';
+import { plural } from './utils/format.js';
 
 const STAGING = '.staging';
 
@@ -125,12 +127,24 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
     if (!state.readVirtual.has(name)) result.warnings.push(`virtual folder "#${name}" is produced but nothing reads it`);
   }
   warnOverlaps(state);
+  const inPlace = samePath(config.source, config.destination);
+  if (inPlace && config.clean && result.unselected.length) {
+    result.errors.push(
+      `${plural(result.unselected.length, 'file')} no action takes would be deleted from the source folder. ` +
+        'Add { "action": "copy", "source": "#rest" }, or set "clean": false'
+    );
+  }
 
   // a strict build fails on warnings too, so it decides before anything reaches the destination
   const failed = result.errors.length > 0 || (Boolean(options.strict) && result.warnings.length > 0);
   if (!result.dryRun) {
     if (failed) await removePath(staging);
-    else await commitStaging(staging, config.destination, state.produced, config.clean);
+    else {
+      // in place, only files the build saw can go: ignored and dot files stay
+      const existing = inPlace ? all : await listFiles(config.destination, [STAGING]);
+      const stale = existing.filter((relative) => !state.produced.has(relative));
+      await commitStaging(staging, config.destination, config.clean ? stale : undefined);
+    }
   }
   return finishBuild(result, started, options);
 }
@@ -254,18 +268,12 @@ function warnOverlaps(state: BuildState): void {
   }
 }
 
-async function commitStaging(
-  staging: string,
-  destination: string,
-  produced: Map<string, string>,
-  clean: boolean
-): Promise<void> {
+// `stale`: the files `clean` removes, or undefined without `clean`
+async function commitStaging(staging: string, destination: string, stale: string[] | undefined): Promise<void> {
   for (const relative of await listFiles(staging))
     await moveFile(path.join(staging, relative), path.join(destination, relative));
-  if (clean && (await statOrNull(destination))) {
-    for (const relative of await listFiles(destination, [STAGING])) {
-      if (!produced.has(relative)) await fs.unlink(path.join(destination, relative));
-    }
+  if (stale && (await statOrNull(destination))) {
+    for (const relative of stale) await fs.unlink(path.join(destination, relative));
     await removeEmptyFolders(destination);
   }
   await removePath(staging);

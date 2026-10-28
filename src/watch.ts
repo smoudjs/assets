@@ -22,6 +22,8 @@ const SETTLE_TIME = 200;
 export interface WatchOptions extends BuildOptions {
   /** Path to the config file. Default: `assets.json` in the working directory, watched even before it exists. */
   config?: string;
+  /** Ignore any config file. */
+  noConfig?: boolean;
   verbose?: boolean;
 }
 
@@ -77,10 +79,23 @@ export async function watch(options: WatchOptions): Promise<void> {
 
   const runBuild = async (): Promise<void> => {
     // read here only to find a preset file to watch; build reads and checks the config on its own
-    const config = await readConfigOrEmpty(configFile);
+    const config = options.noConfig ? {} : await readConfigOrEmpty(configFile);
     const progress = progressIndicator();
     try {
-      const result = await build({ ...options, onProgress: progress.update });
+      // every in-place build would change the source and start the next one. Folders resolve as in build
+      const dir = path.dirname(configFile);
+      const sourceFolder = path.resolve(options.source ?? path.resolve(dir, config.source ?? 'assets'));
+      const destinationFolder = path.resolve(
+        options.destination ?? path.resolve(dir, config.destination ?? 'assets/optimized')
+      );
+      if (samePath(sourceFolder, destinationFolder)) {
+        throw new Error('watch cannot build into the source folder; set another "destination", or use build');
+      }
+      const result = await build({
+        ...options,
+        config: options.noConfig ? {} : options.config,
+        onProgress: progress.update
+      });
       progress.stop();
       process.stdout.write(`${formatReport(result, { verbose: options.verbose })}\n`);
       destination = result.destination;
@@ -107,7 +122,7 @@ export async function watch(options: WatchOptions): Promise<void> {
     building = false;
   };
 
-  watchFile(configFile, noteChange);
+  if (!options.noConfig) watchFile(configFile, noteChange);
   await rebuild();
   process.stdout.write(`${dim('watching for changes, Ctrl+C to stop')}\n`);
 }

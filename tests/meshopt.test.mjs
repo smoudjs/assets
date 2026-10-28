@@ -34,16 +34,12 @@ describe('meshopt', () => {
   it('a .gltf keeps its .bin and texture, the JSON naming both', async () => {
     const { result, outputs, read } = await run({ actions: [{ action: 'meshopt', source: 'models/crate' }] });
     assert.equal(result.ok, true, result.errors.join('\n'));
-    assert.deepEqual(await outputs(), [
-      'models/crate/crate.bin',
-      'models/crate/crate.gltf',
-      'models/crate/crate_wood-0_baseColor.png'
-    ]);
+    assert.deepEqual(await outputs(), ['models/crate/crate.bin', 'models/crate/crate.gltf', 'models/crate/crate.png']);
     const json = modelJson(await read('models/crate/crate.gltf'));
     assert.ok(json.extensionsUsed.includes('EXT_meshopt_compression'));
     assert.deepEqual(
       json.images.map((image) => image.uri),
-      ['crate_wood-0_baseColor.png']
+      ['crate.png']
     );
   });
 

@@ -20,7 +20,17 @@ Use it two ways:
 - [The config file](#the-config-file)
   - [Presets](#presets)
 - [Command line](#command-line)
-- [Action reference](#action-reference): image, atlas, audio, audiosprite, gltf, meshopt, json, xml, copy
+  - [Examples](#examples)
+- [Action reference](#action-reference)
+  - [image](#image)
+  - [atlas](#atlas)
+  - [audio](#audio)
+  - [audiosprite](#audiosprite)
+  - [gltf](#gltf)
+  - [meshopt](#meshopt)
+  - [json](#json)
+  - [xml](#xml)
+  - [copy](#copy)
 - [JavaScript API](#javascript-api)
   - [Your own actions](#your-own-actions)
 
@@ -108,18 +118,20 @@ assets/optimized/
 }
 ```
 
-| Key           | What it does                                                                      | Default                               |
-| ------------- | --------------------------------------------------------------------------------- | ------------------------------------- |
-| `preset`      | A base config yours extends, see [Presets](#presets).                             | `default` when there are no `actions` |
-| `source`      | Folder with your source assets.                                                   | `assets`                              |
-| `destination` | Output folder. Must not be the source folder, contain it, or be the project root. | `assets/optimized`                    |
-| `ignore`      | Files the build never sees. Dot files and `node_modules` are always ignored.      | none                                  |
-| `defaults`    | Starting options per action, see [Defaults](#defaults).                           | none                                  |
-| `actions`     | The list of actions, run top to bottom.                                           | none                                  |
-| `clean`       | Remove files from the destination that this build did not produce.                | `true`                                |
-| `cache`       | Reuse earlier results for unchanged files.                                        | `true`                                |
+| Key           | What it does                                                                 | Default                               |
+| ------------- | ---------------------------------------------------------------------------- | ------------------------------------- |
+| `preset`      | A base config yours extends, see [Presets](#presets).                        | `default` when there are no `actions` |
+| `source`      | Folder with your source assets.                                              | `assets`                              |
+| `destination` | Output folder. Must not contain the source folder or be the project root.    | `assets/optimized`                    |
+| `ignore`      | Files the build never sees. Dot files and `node_modules` are always ignored. | none                                  |
+| `defaults`    | Starting options per action, see [Defaults](#defaults).                      | none                                  |
+| `actions`     | The list of actions, run top to bottom.                                      | none                                  |
+| `clean`       | Remove files from the destination that this build did not produce.           | `true`                                |
+| `cache`       | Reuse earlier results for unchanged files.                                   | `true`                                |
 
 `source` and `destination` are always folders, never patterns. The command line flags `--source` and `--destination` override them.
+
+A `destination` equal to `source` rewrites the files in place. With `clean`, files no action takes would be deleted, so the build fails instead. Commit your assets first. `watch` does not run in place.
 
 With `cache` on, results are kept in `node_modules/.cache/smoud-assets` and reused as long as the file, the options and the action stay the same. Entries older than 30 days are removed, and when the cache passes 1 GB the oldest go until half is left.
 
@@ -283,11 +295,11 @@ The rules:
 
 **Built-in presets:**
 
-| Preset         | What it does                                                                                                                                                                                                                                                                      |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default`      | Compresses images in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                                                                               |
-| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases default to quality 70. Sounds become mono mp3 at 96 kbps. Models drop normals and extract their textures. Then json, xml and copy like `default`. |
-| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas pages default to webp at quality 60. Sounds become mono mp3 at 64 kbps. Model textures become webp, and models over 50,000 triangles are halved.               |
+| Preset         | What it does                                                                                                                                                                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `default`      | Optimizes models, compresses images and sounds in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                                               |
+| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases default to quality 70. Sounds become mono mp3 at 96 kbps. Models extract their textures. Then json, xml and copy like `default`.               |
+| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas pages default to webp at quality 60. Sounds become mono mp3 at 64 kbps. Models drop normals, textures become webp, models over 50,000 triangles are halved. |
 
 ### How a build runs
 
@@ -311,6 +323,7 @@ npx smoud-assets init [options]    # write a starter assets.json
 | Option                | What it does                                                   |
 | --------------------- | -------------------------------------------------------------- |
 | `--config <file>`     | Config file. Without it, `assets.json` is used when it exists. |
+| `--no-config`         | Ignore any config file.                                        |
 | `--source <dir>`      | Source folder. Wins over the config.                           |
 | `--destination <dir>` | Destination folder. Wins over the config.                      |
 | `--preset <name>`     | Preset the config extends.                                     |
@@ -326,6 +339,32 @@ npx smoud-assets build --preset default --source raw --destination public/assets
 ```
 
 The exit code is `0` on success, `1` for a failed build, and `2` for a wrong command. Colours follow `NO_COLOR` and `FORCE_COLOR`.
+
+### Examples
+
+Default optimization, no config needed. Takes `assets/` and writes to `assets/optimized/`. Every file keeps its name, format and size:
+
+```sh
+npx smoud-assets build
+```
+
+A playable ad. Takes `assets/` and writes to `assets/optimized/` with the [playable preset](#presets). Or `{ "preset": "playable" }` in `assets.json`:
+
+```sh
+npx smoud-assets build --preset playable
+```
+
+Rewrite the files in `assets/` with their optimized versions, no copy. Commit your assets first. `--no-config` keeps the command the same even when an `assets.json` is added later:
+
+```sh
+npx smoud-assets build --no-config --destination assets
+```
+
+Takes `assets/` and writes to `../dist/`, outside the project. Or `{ "destination": "../dist" }` in `assets.json`:
+
+```sh
+npx smoud-assets build --destination ../dist
+```
 
 ## Action reference
 

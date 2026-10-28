@@ -3,7 +3,7 @@
     "image": { "quality": 70, "maxWidth": 2048, "maxHeight": 2048 },
     "atlas": { "quality": 70 },
     "audio": { "format": "mp3", "bitrate": 96, "channels": 1 },
-    "gltf": { "normals": false, "textures": { "extract": true, "quality": 70, "maxSize": 2048 } }
+    "gltf": { "textures": { "extract": true, "quality": 70, "maxSize": 2048 } }
   },
   "actions": [
     "gltf",

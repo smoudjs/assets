@@ -1,6 +1,8 @@
 {
   "actions": [
+    { "action": "gltf" },
     { "action": "image", "source": { "exclude": "*.svg" } },
+    { "action": "audio" },
     { "action": "json" },
     { "action": "xml" },
     { "action": "copy", "source": "#rest" }

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { randomInt } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import sharp from 'sharp';
-import { ASSETS, bundle, run, scratchAssets, tag } from './helpers.mjs';
+import { ASSETS, bundle, listFiles, run, scratchAssets, tag } from './helpers.mjs';
 
 describe('core', () => {
   it('writes an explicit destination folder relative to the pattern folder', async () => {
@@ -220,8 +223,84 @@ describe('core', () => {
   });
 
   it('refuses unsafe folder layouts', async () => {
-    await assert.rejects(run({ destination: ASSETS, actions: ['copy'] }), /same folder/);
     await assert.rejects(run({ source: `${ASSETS}/data`, destination: ASSETS, actions: ['copy'] }), /contain/);
     await assert.rejects(run({ destination: process.cwd(), actions: ['copy'] }), /project root/);
+  });
+});
+
+// every test works on its own copy of tests/assets, so the shared assets are never touched
+describe('core: in place', () => {
+  const buttons = (files) => files.filter((file) => file.startsWith('images/ui/buttons/'));
+
+  it('with clean and a copy of #rest, the source ends up holding exactly the output; converted files replace their source', async () => {
+    const assets = await scratchAssets();
+    const before = await listFiles(assets.dir);
+    const { result } = await run({
+      source: assets.dir,
+      destination: assets.dir,
+      actions: [
+        { action: 'image', source: 'images/ui/buttons', format: 'webp' },
+        { action: 'copy', source: '#rest' }
+      ]
+    });
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    const after = await listFiles(assets.dir);
+    assert.deepEqual(buttons(after), ['images/ui/buttons/pause.webp', 'images/ui/buttons/play.webp']);
+    assert.deepEqual(
+      after.filter((file) => !file.startsWith('images/ui/buttons/')),
+      before.filter((file) => !file.startsWith('images/ui/buttons/'))
+    );
+  });
+
+  it('with clean, files no action takes fail the build before anything is touched', async () => {
+    const assets = await scratchAssets();
+    const before = await listFiles(assets.dir);
+    const { result } = await run({
+      source: assets.dir,
+      destination: assets.dir,
+      actions: [{ action: 'image', source: 'images/ui/buttons', format: 'webp' }]
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join('\n'), /no action takes would be deleted from the source folder/);
+    assert.deepEqual(await listFiles(assets.dir), before);
+  });
+
+  it('without clean, outputs are added or written over, and nothing else is touched', async () => {
+    const assets = await scratchAssets();
+    const before = await listFiles(assets.dir);
+    const { result } = await run({
+      source: assets.dir,
+      destination: assets.dir,
+      clean: false,
+      actions: [{ action: 'image', source: 'images/ui/buttons', format: 'webp' }]
+    });
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    assert.deepEqual(
+      await listFiles(assets.dir),
+      [...before, 'images/ui/buttons/pause.webp', 'images/ui/buttons/play.webp'].sort()
+    );
+  });
+
+  it('a second build leaves an optimized file as it is: it is not resized again', async () => {
+    const assets = await scratchAssets();
+    // a fresh image, so the first build really runs instead of coming from another test's cache entry
+    const background = { r: randomInt(256), g: randomInt(256), b: randomInt(256) };
+    await assets.write(
+      'images/backgrounds/sky.jpg',
+      await sharp({ create: { width: 320, height: 240, channels: 3, background } })
+        .jpeg()
+        .toBuffer()
+    );
+    const config = {
+      source: assets.dir,
+      destination: assets.dir,
+      clean: false,
+      actions: [{ action: 'image', source: 'images/backgrounds/sky.jpg', resize: { scale: 0.5 } }]
+    };
+    await run(config);
+    const second = await run(config);
+    assert.equal(second.result.actions[0].fromCache, 1);
+    const sky = await sharp(await readFile(path.join(assets.dir, 'images/backgrounds/sky.jpg'))).metadata();
+    assert.deepEqual([sky.width, sky.height], [160, 120]);
   });
 });

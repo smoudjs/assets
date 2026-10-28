@@ -146,7 +146,7 @@ const options: OptionTable = {
 export const gltf: GltfAction = {
   name: 'gltf',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 1,
+  version: 2,
   cache: true,
   accepts: ['glb', 'gltf'],
   options,
@@ -404,7 +404,13 @@ async function processTextures(doc: Document, modelName: string, options: GltfOp
       });
       if (optimized) {
         data = optimized.data;
-        texture.setImage(new Uint8Array(data)).setMimeType(MIME_TYPES[optimized.format as TextureFormat]);
+        const mimeType = MIME_TYPES[optimized.format as TextureFormat];
+        // a texture with a name keeps it, with the extension of its new format: crate.png becomes crate.webp
+        const uri = texture.getURI();
+        if (uri && mimeType !== texture.getMimeType()) {
+          texture.setURI(`${uri.replace(/\.[^./]*$/, '')}.${IMAGE_EXTENSIONS[mimeType]}`);
+        }
+        texture.setImage(new Uint8Array(data)).setMimeType(mimeType);
       }
     }
     if (extract) {
@@ -482,8 +488,13 @@ export async function writeDocument(doc: Document, format: GltfFormat, model: Gl
   const root = doc.getRoot();
   const name = model.name ?? 'model';
   const names = new Set<string>();
-  root.listBuffers().forEach((buffer, index) => buffer.setURI(index ? `${name}_${index + 1}.bin` : `${name}.bin`));
-  for (const texture of root.listTextures()) texture.setURI(uniqueName(textureFileName(name, texture, tools), names));
+  // files keep the names the source gave them; only those without one, like the parts of a .glb, get a name here
+  root.listBuffers().forEach((buffer, index) => {
+    if (!buffer.getURI()) buffer.setURI(index ? `${name}_${index + 1}.bin` : `${name}.bin`);
+  });
+  for (const texture of root.listTextures()) {
+    if (!texture.getURI()) texture.setURI(uniqueName(textureFileName(name, texture, tools), names));
+  }
   const { json, resources } = await io.writeJSON(doc, { format: core.Format.GLTF });
 
   const files: GltfFile[] = [];

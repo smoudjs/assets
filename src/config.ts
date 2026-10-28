@@ -173,7 +173,8 @@ function resolveFolders(
   return { source: resolveFolder('source', 'assets'), destination: resolveFolder('destination', 'assets/optimized') };
 }
 
-// the three layouts refused here would let `clean` delete the source or the project
+// the two layouts refused here would let `clean` delete the source or the project. The source itself is allowed:
+// the build then optimizes in place, and `clean` removes only source files nothing reproduced
 async function checkFolders(source: string, destination: string): Promise<void> {
   const sourceStat = await statOrNull(source);
   if (!sourceStat) throw new Error(`Source folder not found: ${source}`);
@@ -181,7 +182,6 @@ async function checkFolders(source: string, destination: string): Promise<void> 
   const destinationStat = await statOrNull(destination);
   if (destinationStat && !destinationStat.isDirectory()) throw new Error(`Destination must be a folder: ${destination}`);
 
-  if (samePath(destination, source)) throw new Error('Destination must not be the same folder as the source');
   if (samePath(destination, process.cwd())) throw new Error('Destination must not be the project root');
   if (isPathUnderFolder(source, destination)) throw new Error('Destination must not contain the source folder');
 }

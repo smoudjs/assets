@@ -36,7 +36,7 @@ const options: OptionTable = {
 export const meshopt: MeshoptAction = {
   name: 'meshopt',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 1,
+  version: 2,
   cache: true,
   accepts: ['glb', 'gltf'],
   options,

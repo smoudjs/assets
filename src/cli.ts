@@ -25,6 +25,7 @@ Commands
 
 Options
   --config <file>        Config file (default: assets.json)
+  --no-config            Ignore any config file
   --source <dir>         Base source folder (default: assets)
   --destination <dir>    Base destination folder (default: assets/optimized)
   --preset <name>        Preset the config extends (wins over its "preset")
@@ -44,6 +45,7 @@ async function main(argv: string[]): Promise<number> {
       allowPositionals: true,
       options: {
         config: { type: 'string' },
+        'no-config': { type: 'boolean', default: false },
         source: { type: 'string' },
         destination: { type: 'string' },
         preset: { type: 'string' },
@@ -87,7 +89,7 @@ async function main(argv: string[]): Promise<number> {
       const progress = progressIndicator();
       try {
         const result = await build({
-          config: values.config as string | undefined,
+          config: values['no-config'] ? {} : (values.config as string | undefined),
           preset: values.preset as string | undefined,
           source: values.source as string | undefined,
           destination: values.destination as string | undefined,
@@ -109,6 +111,7 @@ async function main(argv: string[]): Promise<number> {
     case 'watch':
       await watch({
         config: values.config as string | undefined,
+        noConfig: Boolean(values['no-config']),
         preset: values.preset as string | undefined,
         source: values.source as string | undefined,
         destination: values.destination as string | undefined,

@@ -15,14 +15,10 @@ function modelJson(data) {
 const attributes = (json) => Object.keys(json.meshes[0].primitives[0].attributes).sort();
 
 describe('gltf: forms and companions', () => {
-  it('a .gltf keeps its form: JSON, .bin and texture, the JSON naming both', async () => {
+  it('a .gltf keeps its form: JSON, .bin and texture under their source names, the JSON naming both', async () => {
     const { result, outputs, read } = await run({ actions: [{ action: 'gltf', source: 'models/crate' }] });
     assert.equal(result.ok, true, result.errors.join('\n'));
-    assert.deepEqual(await outputs(), [
-      'models/crate/crate.bin',
-      'models/crate/crate.gltf',
-      'models/crate/crate_wood-0_baseColor.png'
-    ]);
+    assert.deepEqual(await outputs(), ['models/crate/crate.bin', 'models/crate/crate.gltf', 'models/crate/crate.png']);
     const json = modelJson(await read('models/crate/crate.gltf'));
     assert.deepEqual(
       json.buffers.map((buffer) => buffer.uri),
@@ -30,7 +26,7 @@ describe('gltf: forms and companions', () => {
     );
     assert.deepEqual(
       json.images.map((image) => image.uri),
-      ['crate_wood-0_baseColor.png']
+      ['crate.png']
     );
   });
 
@@ -70,7 +66,7 @@ describe('gltf: forms and companions', () => {
     const files = await outputs();
     const named = (pattern) => files.find((file) => pattern.test(file));
     const bin = named(/crate\.[0-9a-f]{8}\.bin$/);
-    const png = named(/crate_wood-0_baseColor\.[0-9a-f]{8}\.png$/);
+    const png = named(/crate\.[0-9a-f]{8}\.png$/);
     const json = modelJson(await read(named(/crate\.[0-9a-f]{8}\.gltf$/)));
     assert.equal(json.buffers[0].uri, bin.split('/').pop());
     assert.equal(json.images[0].uri, png.split('/').pop());
