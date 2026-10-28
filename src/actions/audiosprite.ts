@@ -3,12 +3,11 @@
 // sound is encoded once by the audio action.
 
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { findFfmpeg, runFfmpeg } from '@smoud/ffmpeg';
 import { destinationPath } from '../files.js';
 import type { ActionDefinition, AssetFile, OptionTable } from '../types.js';
-import { contentHash } from '../utils/fs.js';
+import { contentHash, withTemporaryFolder } from '../utils/fs.js';
 import { audio } from './audio.js';
 import { resolveOptions } from './index.js';
 
@@ -135,8 +134,7 @@ export const audiosprite: AudioSpriteAction = {
     const parts: Buffer[] = [];
     const entries: AudioSpriteEntry[] = [];
     let offset = 0;
-    const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'smoud-audiosprite-'));
-    try {
+    await withTemporaryFolder(async (folder) => {
       for (const [index, sound] of sorted.entries()) {
         if (index > 0) {
           parts.push(silence);
@@ -154,9 +152,7 @@ export const audiosprite: AudioSpriteAction = {
         });
         offset += pcm.length;
       }
-    } finally {
-      await fs.rm(folder, { recursive: true, force: true });
-    }
+    });
 
     const encoded = await audio.encodeAudio(wavFile(Buffer.concat(parts), channels, sampleRate), {
       format: options.format,
@@ -216,10 +212,9 @@ async function withSoundName<T>(name: string, work: Promise<T>): Promise<T> {
 // written to a file first: mp4 (m4a) can only be read where ffmpeg can seek
 async function decodeToPcm(data: Buffer, file: string, channels: number, sampleRate: number): Promise<Buffer> {
   await fs.writeFile(file, data);
-  const { stdout } = await runFfmpeg([
-    ...['-loglevel', 'error', '-i', file, '-map', '0:a:0'],
-    ...['-f', 's16le', '-c:a', 'pcm_s16le', '-ac', String(channels), '-ar', String(sampleRate), 'pipe:1']
-  ]);
+  const args = ['-loglevel', 'error', '-i', file, '-map', '0:a:0'];
+  args.push('-f', 's16le', '-c:a', 'pcm_s16le', '-ac', String(channels), '-ar', String(sampleRate), 'pipe:1');
+  const { stdout } = await runFfmpeg(args);
   return stdout;
 }
 

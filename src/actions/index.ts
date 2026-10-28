@@ -443,13 +443,12 @@ export async function finishAction(outcome: ActionOutcome): Promise<ActionResult
   const memorySources = new Set(
     origins.map((origin) => (origin.startsWith('#') ? parseVirtualFolder(origin).name : fromMemory ? 'memory' : ''))
   );
-  return {
+  const result: ActionResult = {
     ok: errors.length === 0,
     action,
     label: actionLabel(action, source),
     selected: inputs.length,
     fromCache: outcome.fromCache ?? 0,
-    ...(origins.length && memorySources.size === 1 && !memorySources.has('') ? { memorySource: [...memorySources][0] } : {}),
     files: [...rows.values()],
     outputs,
     destination,
@@ -459,6 +458,11 @@ export async function finishAction(outcome: ActionOutcome): Promise<ActionResult
     errors,
     duration: performance.now() - started
   };
+  // every file came from one virtual folder, or all from memory
+  if (origins.length && memorySources.size === 1 && !memorySources.has('')) {
+    result.memorySource = [...memorySources][0];
+  }
+  return result;
 }
 
 /** `image, source "ui"`: the label used in messages and the report. */

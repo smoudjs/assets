@@ -33,6 +33,7 @@ Making a playable ad? Add `--preset playable` or `--preset playable-max` to conv
   - [gltf](#gltf)
   - [meshopt](#meshopt)
   - [spine](#spine)
+  - [video](#video)
   - [json](#json)
   - [xml](#xml)
   - [copy](#copy)
@@ -49,6 +50,7 @@ Making a playable ad? Add `--preset playable` or `--preset playable-max` to conv
 - 🔊 **Audio**: mp3, ogg, opus or m4a, mono downmix, bitrate by quality, never above the source. Audio sprites for Howler, Phaser and PixiJS Sound.
 - 🧊 **3D models**: [glTF Transform](https://gltf-transform.dev) and meshoptimizer: dedup, weld, prune, simplify, quantize, texture extraction, meshopt compression.
 - 🦴 **Spine**: pages compressed, converted and scaled with the `.atlas` rewritten, skeleton numbers rounded, animations filtered.
+- 🎬 **Video**: mp4 or webm, or animated webp and gif with transparency.
 - 📄 **Data files**: JSON and XML minified.
 - 🎯 **Selection and chaining**: globs, `#rest`, filters on size, image, sound and model facts, virtual `#folders` between actions.
 - 🧰 **Toolkit**: a JSON config or the JavaScript API, every action's raw function, your own actions. Output is plain files for PixiJS, Phaser, Three.js, Cocos or your own loader.
@@ -149,12 +151,12 @@ Each entry in `actions` is one step: which files, what to do, where to put the r
 { "action": "image", "source": "ui", "destination": "interface", "format": "webp", "quality": 80 }
 ```
 
-| Key           | What it does                                                                                                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `meshopt`, `spine`, `json`, `xml`, `copy`, or one you registered. |
-| `source`      | Which files. Omitted: every file the action can handle.                                                                              |
-| `destination` | Where the results go. Omitted: each result lands where its source was.                                                               |
-| anything else | Options of the action, see [Action reference](#action-reference).                                                                    |
+| Key           | What it does                                                                                                                                  |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `meshopt`, `spine`, `video`, `json`, `xml`, `copy`, or one you registered. |
+| `source`      | Which files. Omitted: every file the action can handle.                                                                                       |
+| `destination` | Where the results go. Omitted: each result lands where its source was.                                                                        |
+| anything else | Options of the action, see [Action reference](#action-reference).                                                                             |
 
 A plain string is an action with default settings: `"image"` equals `{ "action": "image" }`.
 
@@ -509,7 +511,12 @@ Converts, downmixes, resamples and compresses sounds. Takes `mp3`, `ogg`, `oga`,
 | `bitrate`     | 8 to 320 kbps, for mp3, ogg, opus and m4a. Wins over `quality`.             | none          |
 | `channels`    | `1` for mono, `2` for stereo.                                               | source        |
 | `sampleRate`  | `8000` to `48000` Hz, standard rates. opus always uses 48000.               | source        |
+| `trim`        | Cut silence from the start and end, see below.                              | `false`       |
+| `normalize`   | Bring every sound to the same loudness, see below.                          | `false`       |
 | `keepSmaller` | Keep the original when encoding would not make it smaller.                  | `true`        |
+
+- `trim`: `true` cuts everything quieter than -50 dB. `{ "threshold": -40 }` cuts louder noise too.
+- `normalize`: `true` brings the sound to -16 LUFS, `{ "loudness": -14 }` to another level. One even gain for the whole sound, so its dynamics stay.
 
 Good to know:
 
@@ -579,6 +586,7 @@ Optimizes glTF models, `.glb` and `.gltf`. Everything it writes loads in any eng
 | `vertexColors`           | `false` removes them.                                                   | `true`        |
 | `materials`              | `false` removes them, and the textures with them.                       | `true`        |
 | `animations`             | `false` removes them.                                                   | `true`        |
+| `resample`               | Remove animation keyframes that change nothing, see below.              | `true`        |
 | `removeUnusedAttributes` | Remove vertex attributes no material uses, like UVs without a texture.  | `false`       |
 | `keepSmaller`            | Keep the original when cleanup alone would not make it smaller.         | `true`        |
 
@@ -592,6 +600,12 @@ Optimizes glTF models, `.glb` and `.gltf`. Everything it writes loads in any eng
 
 - `format`, `quality`, `maxWidth`, `maxHeight`: re-encode through the image action. Without them, textures stay as they are.
 - `extract: true`: textures are written next to the model, like `crate_wood_baseColor.png` (model, material, slot), and removed from it. UVs stay, so the game can put them back.
+
+`resample`:
+
+- `true`: removes keyframes that the ones around them already give, within `0.0001`. Baked animations often shrink a lot.
+- `{ "tolerance": 0.001 }`: removes more. A higher tolerance can change the motion slightly.
+- `false`: keeps every keyframe.
 
 LODs are one action per level:
 
@@ -666,6 +680,27 @@ Good to know:
 - jpeg cannot hold transparency, so a page with it keeps its format, with a warning.
 - Put `spine` before your image and json actions.
 
+### video
+
+Shrinks and compresses videos. Takes `mp4`, `webm`, `mov`, `m4v`, `mkv`, `avi`, `ogv`.
+
+```json
+{ "action": "video", "source": "videos", "maxWidth": 720, "fps": 30 }
+```
+
+| Option        | What it does                                                                 | Default |
+| ------------- | ---------------------------------------------------------------------------- | ------- |
+| `format`      | `mp4`, `webm`, or animated `webp` or `gif` without sound. A webm stays webm. | `mp4`   |
+| `quality`     | 1 to 100, for mp4, webm and webp.                                            | `80`    |
+| `maxWidth`    | Shrink videos wider than this, keeping the aspect ratio.                     | none    |
+| `maxHeight`   | Shrink videos taller than this, keeping the aspect ratio.                    | none    |
+| `fps`         | Frames per second. Never above the source.                                   | source  |
+| `audio`       | `false` removes the sound.                                                   | `true`  |
+| `gif`         | `{ "colors": 256, "dither": true }`                                          |         |
+| `keepSmaller` | Keep the original when re-encoding would not make it smaller.                | `true`  |
+
+Transparency stays in webm, webp and gif. mp4 cannot hold it.
+
 ### json
 
 Minifies JSON files. An invalid file is an error. No options.
@@ -694,6 +729,7 @@ import {
   gltf,
   meshopt,
   spine,
+  video,
   json,
   xml,
   copy,
@@ -781,6 +817,7 @@ const tight = xml.minifyXml(xmlBuffer, { comments: false });
 | `gltf.readGltfMeta(data)`                      | `{ format, triangles, vertices, textures, animations }`                                                                                         |
 | `meshopt.compressGltf(model, options)`         | As `gltf.optimizeGltf`, with the model compressed.                                                                                              |
 | `spine.optimizeSpine(input, options)`          | `{ atlas, files, warnings }`. `files` are the pages and skeleton, by the names the `.atlas` refers to.                                          |
+| `video.encodeVideo(data, options)`             | `{ data, format, width, height, duration, fps, audio, alpha, keptOriginal, warnings }`                                                          |
 | `json.minifyJson(data)`                        | A buffer. Throws on invalid JSON.                                                                                                               |
 | `xml.minifyXml(data, options)`                 | A buffer.                                                                                                                                       |
 

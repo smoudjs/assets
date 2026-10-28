@@ -2,12 +2,11 @@
 // where ffmpeg can seek.
 
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { findFfmpeg, runFfmpeg } from '@smoud/ffmpeg';
 import type { ActionDefinition, AssetMeta, OptionTable } from '../types.js';
 import { resolveOptions, transformFiles } from './index.js';
-import { extension } from '../utils/fs.js';
+import { extension, withTemporaryFolder } from '../utils/fs.js';
 
 type Format = 'mp3' | 'ogg' | 'opus' | 'm4a' | 'wav' | 'flac';
 const FORMATS: Format[] = ['mp3', 'ogg', 'opus', 'm4a', 'wav', 'flac'];
@@ -52,6 +51,8 @@ export interface AudioOptions extends Record<string, unknown> {
   bitrate?: number;
   channels?: 1 | 2;
   sampleRate?: number;
+  trim: boolean | { threshold: number };
+  normalize: boolean | { loudness: number };
   keepSmaller: boolean;
 }
 
@@ -102,6 +103,36 @@ const options: OptionTable = {
     kind: 'enum',
     values: SAMPLE_RATES,
     description: "Sample rate in Hz; never above the source's. opus always plays at 48000 and ignores it"
+  },
+  trim: {
+    kind: 'oneOf',
+    description: 'Cut silence from the start and the end',
+    oneOf: [
+      { kind: 'boolean', description: 'Trim below -50 dB' },
+      {
+        kind: 'object',
+        description: 'Trim settings',
+        properties: {
+          threshold: { kind: 'number', description: 'Loudest level in dB that counts as silence', max: 0, default: -50 }
+        }
+      }
+    ],
+    default: false
+  },
+  normalize: {
+    kind: 'oneOf',
+    description: 'Bring every sound to the same loudness, with one even gain that keeps its dynamics',
+    oneOf: [
+      { kind: 'boolean', description: 'Normalize to -16 LUFS' },
+      {
+        kind: 'object',
+        description: 'Normalize settings',
+        properties: {
+          loudness: { kind: 'number', description: 'Target loudness in LUFS', min: -70, max: -5, default: -16 }
+        }
+      }
+    ],
+    default: false
   },
   keepSmaller: {
     kind: 'boolean',
@@ -167,51 +198,56 @@ export const audio: AudioAction = {
         keptOriginal: true
       };
 
+      // trimmed or normalized, the sound itself changes, so the original can never stand in for it
+      const changesSound = options.trim !== false || options.normalize !== false;
       // re-encoding a lossy file at its own bitrate only loses quality
       const nothingToReduce =
+        !changesSound &&
         format === sourceFormat &&
         channels === source.channels &&
         sampleRate === source.sampleRate &&
         (!lossy || (source.bitrate !== undefined && source.bitrate <= wantedBitrate));
       if (options.keepSmaller && nothingToReduce) return original;
 
+      const inputPath = path.join(folder, 'input');
+      const filters: string[] = [];
+      if (options.trim !== false) {
+        const threshold = options.trim === true ? -50 : options.trim.threshold;
+        // silenceremove cuts only the start, so the sound is reversed to cut its end the same way
+        const cut = `silenceremove=start_periods=1:start_threshold=${threshold}dB`;
+        filters.push(cut, 'areverse', cut, 'areverse');
+      }
+      if (options.normalize !== false) {
+        const loudness = options.normalize === true ? -16 : options.normalize.loudness;
+        const filter = await loudnessFilter(inputPath, filters, loudness);
+        if (filter) filters.push(filter);
+      }
+
       const outputPath = path.join(folder, `output.${format}`);
-      await runFfmpeg([
-        '-loglevel',
-        'error',
-        '-i',
-        path.join(folder, 'input'),
-        '-map',
-        '0:a:0',
-        '-map_metadata',
-        '-1',
-        // the same input always gives the same bytes: no random ogg stream ids, no encoder name tags
-        '-fflags',
-        '+bitexact',
-        '-flags:a',
-        '+bitexact',
-        '-c:a',
-        CODECS[format],
-        '-ac',
-        String(channels),
-        ...(format === 'opus' ? [] : ['-ar', String(sampleRate)]),
-        ...(lossy ? ['-b:a', `${bitrate}k`] : []),
-        ...(format === 'm4a' ? ['-movflags', '+faststart'] : []),
-        '-y',
-        outputPath
-      ]);
+      const args = ['-loglevel', 'error', '-i', inputPath, '-map', '0:a:0', '-map_metadata', '-1'];
+      if (filters.length) args.push('-af', filters.join(','));
+      // the same input always gives the same bytes: no random ogg stream ids, no encoder name tags
+      args.push('-fflags', '+bitexact', '-flags:a', '+bitexact');
+      args.push('-c:a', CODECS[format], '-ac', String(channels));
+      if (format !== 'opus') args.push('-ar', String(sampleRate));
+      if (lossy) args.push('-b:a', `${bitrate}k`);
+      if (format === 'm4a') args.push('-movflags', '+faststart');
+      args.push('-y', outputPath);
+      await runFfmpeg(args);
       const encoded = await fs.readFile(outputPath);
       // only a plain re-encode may fall back to the original: fewer channels or a lower rate asked for must be kept
       const sameShape = format === sourceFormat && channels === source.channels && sampleRate === source.sampleRate;
-      if (options.keepSmaller && sameShape && encoded.length >= data.length) return original;
+      if (options.keepSmaller && !changesSound && sameShape && encoded.length >= data.length) return original;
 
+      // trimming shortens the sound
+      const duration = options.trim === false ? source.duration : (await readFileInfo(outputPath)).duration;
       return {
         data: encoded,
         format,
-        duration: source.duration,
+        duration,
         channels,
         sampleRate,
-        bitrate: measuredBitrate(encoded, source.duration, bitrate),
+        bitrate: measuredBitrate(encoded, duration, bitrate),
         keptOriginal: false
       };
     });
@@ -275,6 +311,20 @@ async function readFileInfo(file: string): Promise<SourceInfo> {
   };
 }
 
+// Two passes: the first measures the sound after `before`, the second applies one even gain (linear), which keeps the
+// dynamics a single pass would squash. Null for a silent sound, which has no loudness to bring up.
+async function loudnessFilter(input: string, before: string[], loudness: number): Promise<string | null> {
+  const target = `loudnorm=I=${loudness}:TP=-1.5:LRA=11`;
+  const filter = [...before, `${target}:print_format=json`].join(',');
+  const { stderr } = await runFfmpeg(['-i', input, '-map', '0:a:0', '-af', filter, '-f', 'null', '-']);
+  const measured = JSON.parse(stderr.slice(stderr.lastIndexOf('{'), stderr.lastIndexOf('}') + 1));
+  if (!Number.isFinite(Number(measured.input_i))) return null;
+  return (
+    `${target}:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:measured_LRA=${measured.input_lra}` +
+    `:measured_thresh=${measured.input_thresh}:offset=${measured.target_offset}:linear=true`
+  );
+}
+
 function formatOfCodec(codec: string): Format | null {
   if (codec.startsWith('pcm_')) return 'wav';
   if (codec === 'vorbis') return 'ogg';
@@ -302,13 +352,4 @@ function withinVorbisLimits(bitrate: number, channels: number, sampleRate: numbe
 // kbps of the whole file, so container overhead counts; `fallback` when the duration is unknown
 function measuredBitrate(data: Buffer, duration: number, fallback: number): number {
   return duration ? Math.round((data.length * 8) / duration / 1000) : fallback;
-}
-
-async function withTemporaryFolder<T>(work: (folder: string) => Promise<T>): Promise<T> {
-  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'smoud-audio-'));
-  try {
-    return await work(folder);
-  } finally {
-    await fs.rm(folder, { recursive: true, force: true });
-  }
 }

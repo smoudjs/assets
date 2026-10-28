@@ -40,6 +40,7 @@ export interface GltfOptions extends Record<string, unknown> {
   vertexColors: boolean;
   materials: boolean;
   animations: boolean;
+  resample: boolean | { tolerance: number };
   removeUnusedAttributes: boolean;
   keepSmaller: boolean;
 }
@@ -144,6 +145,26 @@ const options: OptionTable = {
   vertexColors: keep('vertex colors'),
   materials: keep('materials; without them textures go'),
   animations: keep('animations'),
+  resample: {
+    kind: 'oneOf',
+    description: 'Remove animation keyframes that interpolation already gives; false keeps every keyframe',
+    oneOf: [
+      { kind: 'boolean', description: 'Resample with the default tolerance' },
+      {
+        kind: 'object',
+        description: 'Resample settings',
+        properties: {
+          tolerance: {
+            kind: 'number',
+            description: 'Most a removed keyframe may differ from the interpolated value',
+            min: 0,
+            default: 0.0001
+          }
+        }
+      }
+    ],
+    default: true
+  },
   removeUnusedAttributes: {
     kind: 'boolean',
     description:
@@ -162,7 +183,7 @@ const options: OptionTable = {
 export const gltf: GltfAction = {
   name: 'gltf',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 3,
+  version: 4,
   cache: true,
   accepts: ['glb', 'gltf'],
   options,
@@ -237,7 +258,8 @@ export const gltf: GltfAction = {
       uvs: has('TEXCOORD_'),
       vertexColors: has('COLOR_'),
       materials: root.listMaterials().length > 0,
-      animations: root.listAnimations().length > 0
+      animations: root.listAnimations().length > 0,
+      resample: root.listAnimations().length > 0
     };
 
     removeData(doc, options);
@@ -245,6 +267,11 @@ export const gltf: GltfAction = {
     const extracting = options.textures.extract && doc.getRoot().listTextures().length > 0;
     const keepAttributes = !options.removeUnusedAttributes || extracting;
     const extracted = await processTextures(doc, model.name ?? 'model', options, tools);
+    // its own cleanup would dedup and prune without the settings below, so the cleanup after it does that job
+    if (options.resample) {
+      const tolerance = options.resample === true ? 0.0001 : options.resample.tolerance;
+      await doc.transform(functions.resample({ tolerance, cleanup: false }));
+    }
     // weld first, so the geometry dedup shares stays shared; dedup keeps named parts apart and prune keeps empty nodes
     // and one-colour textures, since game code may look them up; prune last removes what the steps before left unused
     await doc.transform(

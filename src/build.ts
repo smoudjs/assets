@@ -8,7 +8,15 @@ import path from 'node:path';
 import { parseVirtualFolder } from './actions/index.js';
 import { loadConfig, prepareConfig, type PreparedAction, type PreparedConfig } from './config.js';
 import { destinationPath, listSourceFiles, selectFiles } from './files.js';
-import type { ActionResult, AssetFile, AssetsConfig, BuildResult, FileResult, ProgressEvent } from './types.js';
+import type {
+  ActionResult,
+  AssetFile,
+  AssetsConfig,
+  BuildResult,
+  FileResult,
+  ProcessParams,
+  ProgressEvent
+} from './types.js';
 import {
   isPathUnderFolder,
   join,
@@ -194,15 +202,16 @@ async function runAction(action: PreparedAction, files: AssetFile[], state: Buil
   const position = { label: action.label, index: action.index, actions: state.config.actions.length };
   const onProgress = state.onProgress && ((event: ProgressEvent) => state.onProgress?.({ ...event, ...position }));
   onProgress?.({ ...position, done: 0, total: files.length });
+  const params: ProcessParams & Record<string, unknown> = {
+    ...action.options,
+    source: files,
+    destination: { filename: target.filename }
+  };
+  if (state.cache && action.action.cache) params.cache = true;
+  if (onProgress) params.onProgress = onProgress;
   let result: ActionResult;
   try {
-    result = await action.action.process({
-      ...action.options,
-      source: files,
-      destination: { filename: target.filename },
-      ...(state.cache && action.action.cache ? { cache: true } : {}),
-      ...(onProgress ? { onProgress } : {})
-    });
+    result = await action.action.process(params);
   } catch (error) {
     state.result.errors.push(`${where}: ${(error as Error).message}`);
     return;

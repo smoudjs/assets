@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { promises as fs, type Stats } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 /** Every file under `dir` as sorted posix paths relative to `dir`; `[]` when the folder does not exist. */
@@ -67,6 +68,16 @@ export async function removeEmptyFolders(dir: string): Promise<void> {
     return empty;
   }
   await visit(dir);
+}
+
+/** Runs `work` in a fresh folder under the system temp folder, and removes the folder afterwards, also on failure. */
+export async function withTemporaryFolder<T>(work: (folder: string) => Promise<T>): Promise<T> {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'smoud-assets-'));
+  try {
+    return await work(folder);
+  } finally {
+    await removePath(folder);
+  }
 }
 
 /** The file or folder's stats, or null when nothing is there. */

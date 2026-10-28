@@ -149,6 +149,31 @@ describe('gltf: cleanup and removals', () => {
     assert.ok(attributes(modelJson(await read('models/crate.glb'))).includes('TEXCOORD_0'));
   });
 
+  it('resample drops keyframes interpolation already gives, unless turned off', async () => {
+    const { Document, NodeIO } = await import('@gltf-transform/core');
+    const doc = new Document();
+    const buffer = doc.createBuffer();
+    const accessor = (type, array) => doc.createAccessor().setType(type).setArray(array).setBuffer(buffer);
+    const node = doc.createNode('slider');
+    doc.createScene().addChild(node);
+    // five keyframes on a straight line: the middle three add nothing
+    const sampler = doc
+      .createAnimationSampler()
+      .setInput(accessor('SCALAR', new Float32Array([0, 1, 2, 3, 4])))
+      .setOutput(accessor('VEC3', new Float32Array([0, 0, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0])));
+    const channel = doc.createAnimationChannel().setTargetNode(node).setTargetPath('translation').setSampler(sampler);
+    doc.createAnimation('slide').addSampler(sampler).addChannel(channel);
+    const data = Buffer.from(await new NodeIO().writeBinary(doc));
+    const keyframes = async (options) => {
+      const json = modelJson((await gltf.optimizeGltf({ data }, options)).data);
+      return json.accessors[json.animations[0].samplers[0].input].count;
+    };
+
+    assert.equal(await keyframes({}), 2);
+    assert.equal(await keyframes({ resample: { tolerance: 0.001 } }), 2);
+    assert.equal(await keyframes({ resample: false }), 5);
+  });
+
   it('normals, vertexColors, animations, uvs and materials go when turned off', async () => {
     const config = (options) => ({ actions: [{ action: 'gltf', source: 'models/crate.glb', ...options }] });
     const read = async (options) => modelJson(await (await run(config(options))).read('models/crate.glb'));

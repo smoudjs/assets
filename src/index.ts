@@ -18,6 +18,7 @@ import { image as imageAction } from './actions/image.js';
 import { json as jsonAction } from './actions/json.js';
 import { meshopt as meshoptAction } from './actions/meshopt.js';
 import { spine as spineAction } from './actions/spine.js';
+import { video as videoAction } from './actions/video.js';
 import { xml as xmlAction } from './actions/xml.js';
 
 // the built-in actions; a new one is registered here
@@ -25,6 +26,7 @@ export const image = actions.register(imageAction);
 export const atlas = actions.register(atlasAction);
 export const audio = actions.register(audioAction);
 export const audiosprite = actions.register(audiospriteAction);
+export const video = actions.register(videoAction);
 export const gltf = actions.register(gltfAction);
 export const meshopt = actions.register(meshoptAction);
 export const spine = actions.register(spineAction);
@@ -67,6 +69,7 @@ export {
   type SpineInput,
   type SpineOptions
 } from './actions/spine.js';
+export { type EncodedVideo, type VideoAction, type VideoOptions } from './actions/video.js';
 export { type XmlAction, type XmlOptions } from './actions/xml.js';
 export { build, type BuildOptions } from './build.js';
 export { loadPreset, presetFilePath, readConfigFile } from './config.js';
