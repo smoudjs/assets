@@ -1,7 +1,7 @@
 // The sandbox as JavaScript: the same actions as assets.json, called one by one through the public API.
 // Run: npm run sandbox:js
 
-import { atlas, audio, audiosprite, copy, formatReport, gltf, image, json, meshopt, xml } from '../dist/index.js';
+import { atlas, audio, audiosprite, formatReport, gltf, image, json, meshopt, spine, xml } from '../dist/index.js';
 
 const source = 'tests/assets';
 const destination = 'sandbox/compiled-js';
@@ -11,7 +11,8 @@ async function main() {
   const icons = await image.process({ source: `${source}/images/ui/icons`, format: 'png', density: 144 });
 
   const results = [
-    await json.process({ source, destination }),
+    // the Spine skeleton .json is left to the spine action below
+    await json.process({ source: { include: source, exclude: [`${source}/spine`] }, destination }),
     await xml.process({ source, destination }),
     await atlas.process({ source: `${source}/sprites`, destination, extrude: 1 }),
     await atlas.process({
@@ -60,18 +61,20 @@ async function main() {
       source: (await gltf.process({ source: `${source}/models/crate.glb` })).outputs,
       destination: `${destination}/models/compressed`
     }),
+    await spine.process({
+      source: `${source}/spine`,
+      destination: `${destination}/spine`,
+      format: 'webp',
+      animations: { exclude: ['debug/*'] }
+    }),
     // "#rest" exists only in a build; here the folders handled above are excluded by hand. The crate's texture
-    // belongs to its .gltf, so models are left out too
+    // belongs to its .gltf and the Spine page to its .atlas, so models and spine are left out too
     await image.process({
       source: {
         include: source,
-        exclude: [`${source}/sprites`, `${source}/tiles`, `${source}/images/ui/icons`, `${source}/models`]
+        exclude: [`${source}/sprites`, `${source}/tiles`, `${source}/images/ui/icons`, `${source}/models`, `${source}/spine`]
       },
       destination
-    }),
-    await copy.process({
-      source: { include: `${source}/spine`, exclude: ['*.json', '*.png'] },
-      destination: `${destination}/spine`
     })
   ];
   console.log(formatReport(results, { verbose: true }));

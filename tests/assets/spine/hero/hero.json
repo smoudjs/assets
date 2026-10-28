@@ -6,8 +6,64 @@
   "bones": [
     {
       "name": "root"
+    },
+    {
+      "name": "head",
+      "parent": "root",
+      "x": 1.23456789,
+      "y": -2.98765432
     }
   ],
   "slots": [],
-  "skins": []
+  "skins": [],
+  "animations": {
+    "idle": {
+      "bones": {
+        "head": {
+          "rotate": [
+            {
+              "time": 0.3333333,
+              "value": 5.5555555
+            }
+          ]
+        }
+      }
+    },
+    "run_fast": {
+      "bones": {
+        "head": {
+          "rotate": [
+            {
+              "time": 0.3333333,
+              "value": 10
+            }
+          ]
+        }
+      }
+    },
+    "run_slow": {
+      "bones": {
+        "head": {
+          "rotate": [
+            {
+              "time": 0.3333333,
+              "value": -10
+            }
+          ]
+        }
+      }
+    },
+    "debug/walk": {
+      "bones": {
+        "head": {
+          "rotate": [
+            {
+              "time": 0.3333333,
+              "value": 1
+            }
+          ]
+        }
+      }
+    }
+  }
 }

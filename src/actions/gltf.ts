@@ -7,7 +7,7 @@ import type { Document } from '@gltf-transform/core';
 import { destinationPath } from '../files.js';
 import type { ActionDefinition, AssetFile, AssetMeta, OptionTable, TransformResult } from '../types.js';
 import { basename, dirname, extension, join } from '../utils/fs.js';
-import { image } from './image.js';
+import { image, type ImageOptions } from './image.js';
 import { resolveOptions, transformFiles } from './index.js';
 
 type GltfFormat = 'glb' | 'gltf' | 'gltf-embedded';
@@ -32,7 +32,7 @@ export interface GltfOptions extends Record<string, unknown> {
   format?: GltfFormat;
   quantize: boolean;
   simplify: { ratio?: number; error: number; method: 'collapse' | 'sloppy' };
-  textures: { format?: TextureFormat; quality?: number; maxSize?: number; extract: boolean };
+  textures: { format?: TextureFormat; quality?: number; maxWidth?: number; maxHeight?: number; extract: boolean };
   normals: boolean;
   tangents: boolean;
   uvs: boolean;
@@ -122,11 +122,8 @@ const options: OptionTable = {
     properties: {
       format: { kind: 'enum', values: ['png', 'jpeg', 'webp', 'avif'], description: 'Texture format. Omitted: as it is' },
       quality: { kind: 'number', description: 'Quality, as in the image action', min: 1, max: 100 },
-      maxSize: {
-        kind: 'number',
-        description: 'Shrink textures wider or taller than this, keeping the aspect ratio',
-        min: 1
-      },
+      maxWidth: { kind: 'number', description: 'Shrink textures wider than this, keeping the aspect ratio', min: 1 },
+      maxHeight: { kind: 'number', description: 'Shrink textures taller than this, keeping the aspect ratio', min: 1 },
       extract: {
         kind: 'boolean',
         description: 'Write the textures as files next to the model and remove them from it',
@@ -386,8 +383,14 @@ function removeData(doc: Document, options: GltfOptions): void {
 }
 
 async function processTextures(doc: Document, modelName: string, options: GltfOptions, tools: GltfTransform) {
-  const { format, quality, maxSize, extract } = options.textures;
-  const reencode = format !== undefined || quality !== undefined || maxSize !== undefined;
+  const { format, quality, maxWidth, maxHeight, extract } = options.textures;
+  const reencode = format !== undefined || quality !== undefined || maxWidth !== undefined || maxHeight !== undefined;
+  // a palette would band normal and roughness maps, so png textures stay lossless
+  const imageOptions: Partial<ImageOptions> = { png: { palette: false, colors: 256, dither: 1, effort: 7 } };
+  if (format) imageOptions.format = format;
+  if (quality !== undefined) imageOptions.quality = quality;
+  if (maxWidth !== undefined) imageOptions.maxWidth = maxWidth;
+  if (maxHeight !== undefined) imageOptions.maxHeight = maxHeight;
   const extracted: GltfFile[] = [];
   const names = new Set<string>();
   for (const texture of doc.getRoot().listTextures()) {
@@ -395,13 +398,7 @@ async function processTextures(doc: Document, modelName: string, options: GltfOp
     if (!original) continue;
     let data: Buffer = Buffer.from(original);
     if (reencode && Object.values(MIME_TYPES).includes(texture.getMimeType())) {
-      // a palette would band normal and roughness maps, so png textures stay lossless
-      const optimized = await image.optimizeImage(data, {
-        ...(format ? { format } : {}),
-        ...(quality !== undefined ? { quality } : {}),
-        ...(maxSize !== undefined ? { maxWidth: maxSize, maxHeight: maxSize } : {}),
-        png: { palette: false, colors: 256, dither: 1, effort: 7 }
-      });
+      const optimized = await image.optimizeImage(data, imageOptions);
       if (optimized) {
         data = optimized.data;
         const mimeType = MIME_TYPES[optimized.format as TextureFormat];

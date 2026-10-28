@@ -17,6 +17,7 @@ import { gltf as gltfAction } from './actions/gltf.js';
 import { image as imageAction } from './actions/image.js';
 import { json as jsonAction } from './actions/json.js';
 import { meshopt as meshoptAction } from './actions/meshopt.js';
+import { spine as spineAction } from './actions/spine.js';
 import { xml as xmlAction } from './actions/xml.js';
 
 // the built-in actions; a new one is registered here
@@ -26,6 +27,7 @@ export const audio = actions.register(audioAction);
 export const audiosprite = actions.register(audiospriteAction);
 export const gltf = actions.register(gltfAction);
 export const meshopt = actions.register(meshoptAction);
+export const spine = actions.register(spineAction);
 export const json = actions.register(jsonAction);
 export const xml = actions.register(xmlAction);
 export const copy = actions.register(copyAction);
@@ -58,6 +60,13 @@ export { type GltfAction, type GltfFile, type GltfInput, type GltfOptions, type 
 export { type ImageAction, type ImageOptions, type OptimizedImage, type ResizeOptions } from './actions/image.js';
 export { type JsonAction } from './actions/json.js';
 export { type MeshoptAction, type MeshoptOptions } from './actions/meshopt.js';
+export {
+  type OptimizedSpine,
+  type SpineAction,
+  type SpineFile,
+  type SpineInput,
+  type SpineOptions
+} from './actions/spine.js';
 export { type XmlAction, type XmlOptions } from './actions/xml.js';
 export { build, type BuildOptions } from './build.js';
 export { loadPreset, presetFilePath, readConfigFile } from './config.js';

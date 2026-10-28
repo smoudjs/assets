@@ -151,11 +151,28 @@ await write('sprites/coin/coin_02.png', await png(frame(24, [250, 210, 40], 1)))
 await write('spine/hero/hero.png', await png(paint(64, 64, (x, y) => [x * 4, y * 4, 128, x < 32 ? 255 : 128])));
 await write(
   'spine/hero/hero.atlas',
-  Buffer.from('hero.png\nsize: 64, 64\nformat: RGBA8888\nfilter: Linear, Linear\nrepeat: none\nhead\n  bounds: 0, 0, 32, 32\nbody\n  bounds: 32, 0, 32, 32\n')
+  Buffer.from(
+    'hero.png\nsize: 64, 64\nformat: RGBA8888\nfilter: Linear, Linear\nrepeat: none\n' +
+      'head\n  bounds: 0, 0, 32, 32\n  offsets: 2, 2, 36, 36\nbody\n  bounds: 32, 0, 32, 32\n'
+  )
 );
+// long decimals as Spine exports them, and animations to keep or drop by name and pattern, one in a folder
+const turn = (degrees) => ({ bones: { head: { rotate: [{ time: 0.3333333, value: degrees }] } } });
 await write(
   'spine/hero/hero.json',
-  Buffer.from(JSON.stringify({ skeleton: { spine: '4.1.00', hash: 'test' }, bones: [{ name: 'root' }], slots: [], skins: [] }, null, 2))
+  Buffer.from(
+    JSON.stringify(
+      {
+        skeleton: { spine: '4.1.00', hash: 'test' },
+        bones: [{ name: 'root' }, { name: 'head', parent: 'root', x: 1.23456789, y: -2.98765432 }],
+        slots: [],
+        skins: [],
+        animations: { idle: turn(5.5555555), run_fast: turn(10), run_slow: turn(-10), 'debug/walk': turn(1) }
+      },
+      null,
+      2
+    )
+  )
 );
 await write('spine/hero/hero.skel', Buffer.from([0x53, 0x4b, 0x45, 0x4c, 0x00, 0x04, 0x01, 0x00]));
 

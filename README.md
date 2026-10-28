@@ -28,6 +28,7 @@ Use it two ways:
   - [audiosprite](#audiosprite)
   - [gltf](#gltf)
   - [meshopt](#meshopt)
+  - [spine](#spine)
   - [json](#json)
   - [xml](#xml)
   - [copy](#copy)
@@ -41,6 +42,7 @@ Use it two ways:
 - 🔊 **Audio**: convert to mp3, ogg, opus or m4a, downmix to mono, resample, set the bitrate. Never raises the quality of a source.
 - 🎚️ **Audio sprites**: many sounds in one file, with a JSON for Howler, Phaser, PixiJS Sound or your own loader.
 - 🧊 **3D models**: clean up, simplify and quantize glTF and GLB, strip normals or materials, extract textures, meshopt compression.
+- 🦴 **Spine**: compress, convert and scale atlas pages with the `.atlas` rewritten to match, round skeleton numbers, keep or drop animations.
 - 📄 **Data files**: JSON and XML minified.
 - 🎯 **Explicit selection**: folders, globs, `#rest`, filters on size, image, sound and model facts.
 - 🔗 **Chaining**: virtual `#folders` pass results from one action to the next, for example rasterize svg icons, then pack them.
@@ -143,12 +145,12 @@ Each entry in `actions` is one step: which files, what to do, where to put the r
 { "action": "image", "source": "ui", "destination": "interface", "format": "webp", "quality": 80 }
 ```
 
-| Key           | What it does                                                                                                                |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `meshopt`, `json`, `xml`, `copy`, or one you registered. |
-| `source`      | Which files. Omitted: every file the action can handle.                                                                     |
-| `destination` | Where the results go. Omitted: each result lands where its source was.                                                      |
-| anything else | Options of the action, see [Action reference](#action-reference).                                                           |
+| Key           | What it does                                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `meshopt`, `spine`, `json`, `xml`, `copy`, or one you registered. |
+| `source`      | Which files. Omitted: every file the action can handle.                                                                              |
+| `destination` | Where the results go. Omitted: each result lands where its source was.                                                               |
+| anything else | Options of the action, see [Action reference](#action-reference).                                                                    |
 
 A plain string is an action with default settings: `"image"` equals `{ "action": "image" }`.
 
@@ -295,11 +297,11 @@ The rules:
 
 **Built-in presets:**
 
-| Preset         | What it does                                                                                                                                                                                                                                                                   |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `default`      | Optimizes models, compresses images and sounds in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                                               |
-| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases default to quality 70. Sounds become mono mp3 at 96 kbps. Models extract their textures. Then json, xml and copy like `default`.               |
-| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas pages default to webp at quality 60. Sounds become mono mp3 at 64 kbps. Models drop normals, textures become webp, models over 50,000 triangles are halved. |
+| Preset         | What it does                                                                                                                                                                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `default`      | Optimizes models and Spine, compresses images and sounds in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                                   |
+| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases and Spine pages use quality 70. Sounds become mono mp3 at 96 kbps. Models extract their textures. Then json, xml and copy like `default`.    |
+| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas and Spine pages: webp, quality 60. Sounds become mono mp3 at 64 kbps. Models drop normals, textures become webp, models over 50,000 triangles are halved. |
 
 ### How a build runs
 
@@ -557,7 +559,7 @@ Optimizes glTF models, `.glb` and `.gltf`. Everything it writes loads in any eng
 
 `textures`:
 
-- `format`, `quality`, `maxSize`: re-encode through the image action. Without them, textures stay as they are.
+- `format`, `quality`, `maxWidth`, `maxHeight`: re-encode through the image action. Without them, textures stay as they are.
 - `extract: true`: textures are written next to the model, like `crate_wood_baseColor.png` (model, material, slot), and removed from it. UVs stay, so the game can put them back.
 
 LODs are one action per level:
@@ -607,6 +609,30 @@ loader.setMeshoptDecoder(MeshoptDecoder);
 
 Works on any glTF model. Run `gltf` before it to also clean up, simplify or re-encode textures, as in the example above.
 
+### spine
+
+Optimizes Spine exports. Takes `.atlas` files. The pages an atlas names and the skeleton with its name, `hero.json` or `hero.skel`, come with it, and no later action takes them.
+
+```json
+{ "action": "spine", "source": "spine", "format": "webp", "quality": 70, "animations": { "exclude": ["debug/*"] } }
+```
+
+| Option       | What it does                                                                                | Default       |
+| ------------ | ------------------------------------------------------------------------------------------- | ------------- |
+| `format`     | Page format: `png`, `jpeg`, `webp`, `avif`. The `.atlas` is rewritten to match.             | as the source |
+| `quality`    | 1 to 100. For png pages, setting it switches to palette compression.                        | not set       |
+| `scale`      | Shrink pages, 0 to 1. Every coordinate in the `.atlas` scales with them.                    | `1`           |
+| `maxWidth`   | Shrink pages wider than this. Their coordinates in the `.atlas` follow.                     | none          |
+| `maxHeight`  | Shrink pages taller than this. Their coordinates in the `.atlas` follow.                    | none          |
+| `precision`  | Decimals kept for numbers in the skeleton `.json`.                                          | `3`           |
+| `animations` | `{ "include": [...] }` or `{ "exclude": [...] }`: names or patterns, like `run*`. Not both. | all kept      |
+
+Good to know:
+
+- A binary `.skel` is kept as it is. `animations` and `precision` work on a `.json` skeleton.
+- jpeg cannot hold transparency, so a page with it keeps its format, with a warning.
+- Put `spine` before your image and json actions.
+
 ### json
 
 Minifies JSON files. An invalid file is an error. No options.
@@ -634,6 +660,7 @@ import {
   audiosprite,
   gltf,
   meshopt,
+  spine,
   json,
   xml,
   copy,
@@ -701,6 +728,10 @@ const sprite = await audiosprite.packAudioSprite(
 );
 const model = await gltf.optimizeGltf({ data: glbBuffer }, { simplify: { ratio: 0.5 } });
 const compressed = await meshopt.compressGltf({ data: model.data });
+const hero = await spine.optimizeSpine(
+  { atlas: atlasText, files: { 'hero.png': heroPng, 'hero.json': heroJson } },
+  { format: 'webp', scale: 0.5 }
+);
 const small = json.minifyJson(jsonBuffer);
 const tight = xml.minifyXml(xmlBuffer, { comments: false });
 ```
@@ -716,6 +747,7 @@ const tight = xml.minifyXml(xmlBuffer, { comments: false });
 | `gltf.optimizeGltf(model, options)`            | `{ data, format, files, triangles, vertices, textures, animations }`. `files` are the `.bin` and textures the model refers to, by name.         |
 | `gltf.readGltfMeta(data)`                      | `{ format, triangles, vertices, textures, animations }`                                                                                         |
 | `meshopt.compressGltf(model, options)`         | As `gltf.optimizeGltf`, with the model compressed.                                                                                              |
+| `spine.optimizeSpine(input, options)`          | `{ atlas, files, warnings }`. `files` are the pages and skeleton, by the names the `.atlas` refers to.                                          |
 | `json.minifyJson(data)`                        | A buffer. Throws on invalid JSON.                                                                                                               |
 | `xml.minifyXml(data, options)`                 | A buffer.                                                                                                                                       |
 

@@ -3,13 +3,19 @@
   "destination": "./compiled",
   "ignore": ["generate.mjs"],
   "actions": [
+    { "action": "spine", "source": "spine", "format": "webp", "animations": { "exclude": ["debug/*"] } },
     "json",
     "xml",
     { "action": "atlas", "source": "sprites", "extrude": 1 },
     { "action": "atlas", "source": "tiles", "destination": "atlases", "trim": false, "extrude": 2, "powerOfTwo": true },
     { "action": "image", "source": "images/ui/icons", "format": "png", "density": 144, "destination": "#icons" },
     { "action": "atlas", "source": "#icons", "padding": 4 },
-    { "action": "audio", "source": { "include": "audio/music", "when": { "duration": ">1" } }, "format": "ogg", "quality": 70 },
+    {
+      "action": "audio",
+      "source": { "include": "audio/music", "when": { "duration": ">1" } },
+      "format": "ogg",
+      "quality": 70
+    },
     { "action": "audiosprite", "source": "audio/sfx", "destination": "audio", "channels": 1, "quality": 60 },
     {
       "action": "audiosprite",
@@ -28,7 +34,11 @@
       "animations": false,
       "textures": { "extract": true, "format": "webp" }
     },
-    { "action": "gltf", "source": "models/sphere.glb", "destination": { "folder": "models/lods", "filename": "[name]_lod0" } },
+    {
+      "action": "gltf",
+      "source": "models/sphere.glb",
+      "destination": { "folder": "models/lods", "filename": "[name]_lod0" }
+    },
     {
       "action": "gltf",
       "source": "models/sphere.glb",
@@ -37,7 +47,6 @@
     },
     { "action": "gltf", "source": "models/crate.glb", "destination": "#compressed" },
     { "action": "meshopt", "source": "#compressed", "destination": "models/compressed" },
-    { "action": "image", "source": "#rest" },
-    { "source": { "include": "spine", "exclude": ["*.json", "*.png"] }, "action": "copy" }
+    { "action": "image", "source": "#rest" }
   ]
 }

@@ -1,5 +1,9 @@
 {
+  "defaults": {
+    "spine": { "quality": 80 }
+  },
   "actions": [
+    { "action": "spine" },
     { "action": "gltf" },
     { "action": "image", "source": { "exclude": "*.svg" } },
     { "action": "audio" },
