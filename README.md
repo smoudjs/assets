@@ -33,6 +33,7 @@ Making a playable ad? Add `--preset playable` or `--preset playable-max` to conv
   - [gltf](#gltf)
   - [meshopt](#meshopt)
   - [spine](#spine)
+  - [font](#font)
   - [video](#video)
   - [json](#json)
   - [xml](#xml)
@@ -50,6 +51,7 @@ Making a playable ad? Add `--preset playable` or `--preset playable-max` to conv
 - 🔊 **Audio**: mp3, ogg, opus or m4a, mono downmix, bitrate by quality, never above the source. Audio sprites for Howler, Phaser and PixiJS Sound.
 - 🧊 **3D models**: [glTF Transform](https://gltf-transform.dev) and meshoptimizer: dedup, weld, prune, simplify, quantize, texture extraction, meshopt compression.
 - 🦴 **Spine**: pages compressed, converted and scaled with the `.atlas` rewritten, skeleton numbers rounded, animations filtered.
+- ✒️ **Fonts**: [HarfBuzz](https://harfbuzz.github.io) subsetting to the characters you use, WOFF2 and WOFF.
 - 🎬 **Video**: mp4 or webm, or animated webp and gif with transparency.
 - 📄 **Data files**: JSON and XML minified.
 - 🎯 **Selection and chaining**: globs, `#rest`, filters on size, image, sound and model facts, virtual `#folders` between actions.
@@ -151,12 +153,12 @@ Each entry in `actions` is one step: which files, what to do, where to put the r
 { "action": "image", "source": "ui", "destination": "interface", "format": "webp", "quality": 80 }
 ```
 
-| Key           | What it does                                                                                                                                  |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `meshopt`, `spine`, `video`, `json`, `xml`, `copy`, or one you registered. |
-| `source`      | Which files. Omitted: every file the action can handle.                                                                                       |
-| `destination` | Where the results go. Omitted: each result lands where its source was.                                                                        |
-| anything else | Options of the action, see [Action reference](#action-reference).                                                                             |
+| Key           | What it does                                                                                                                                          |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `meshopt`, `spine`, `font`, `video`, `json`, `xml`, `copy`, or one you registered. |
+| `source`      | Which files. Omitted: every file the action can handle.                                                                                               |
+| `destination` | Where the results go. Omitted: each result lands where its source was.                                                                                |
+| anything else | Options of the action, see [Action reference](#action-reference).                                                                                     |
 
 A plain string is an action with default settings: `"image"` equals `{ "action": "image" }`.
 
@@ -303,11 +305,11 @@ The rules:
 
 **Built-in presets:**
 
-| Preset         | What it does                                                                                                                                                                                                                                                                 |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default`      | Optimizes models and Spine, compresses images and sounds in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                                   |
-| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases and Spine pages use quality 70. Sounds become mono mp3 at 96 kbps. Models extract their textures. Then json, xml and copy like `default`.    |
-| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas and Spine pages: webp, quality 60. Sounds become mono mp3 at 64 kbps. Models drop normals, textures become webp, models over 50,000 triangles are halved. |
+| Preset         | What it does                                                                                                                                                                                                                                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `default`      | Optimizes models and Spine, compresses images and sounds in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                                                                       |
+| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases and Spine pages use quality 70. Sounds become mono mp3 at 96 kbps. Models extract their textures. Fonts become woff2. Then json, xml and copy like `default`.                    |
+| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas and Spine pages: webp, quality 60. Sounds become mono mp3 at 64 kbps. Models drop normals, textures become webp, models over 50,000 triangles are halved. Fonts become woff2 without hinting. |
 
 #### Typical results
 
@@ -680,6 +682,25 @@ Good to know:
 - jpeg cannot hold transparency, so a page with it keeps its format, with a warning.
 - Put `spine` before your image and json actions.
 
+### font
+
+Keeps only the characters you use, and converts to WOFF2. Takes `ttf`, `otf`, `woff`, `woff2`.
+
+```json
+{ "action": "font", "source": "fonts", "format": "woff2", "subset": "Play Again! Score: 0123456789" }
+```
+
+| Option          | What it does                                                              | Default       |
+| --------------- | ------------------------------------------------------------------------- | ------------- |
+| `format`        | `woff2`, `woff`, or plain `ttf` or `otf` with the font's own outlines.    | as the source |
+| `subset`        | Characters to keep, see below.                                            | all           |
+| `removeHinting` | Remove hinting, which only sharpens small text on low-resolution screens. | `false`       |
+| `keepSmaller`   | Keep the original when converting would not make it smaller.              | `true`        |
+
+- `subset`: a string of characters, or `{ "text": "...", "ranges": ["U+0020-007E", "U+0400-04FF"] }`. Ligatures and kerning between the kept characters keep working.
+
+Arial, 1 MB, becomes 37 KB as WOFF2 with Latin letters and digits, or 9 KB without hinting.
+
 ### video
 
 Shrinks and compresses videos. Takes `mp4`, `webm`, `mov`, `m4v`, `mkv`, `avi`, `ogv`.
@@ -729,6 +750,7 @@ import {
   gltf,
   meshopt,
   spine,
+  font,
   video,
   json,
   xml,
@@ -817,6 +839,7 @@ const tight = xml.minifyXml(xmlBuffer, { comments: false });
 | `gltf.readGltfMeta(data)`                      | `{ format, triangles, vertices, textures, animations }`                                                                                         |
 | `meshopt.compressGltf(model, options)`         | As `gltf.optimizeGltf`, with the model compressed.                                                                                              |
 | `spine.optimizeSpine(input, options)`          | `{ atlas, files, warnings }`. `files` are the pages and skeleton, by the names the `.atlas` refers to.                                          |
+| `font.optimizeFont(data, options)`             | `{ data, format, keptOriginal }`                                                                                                                |
 | `video.encodeVideo(data, options)`             | `{ data, format, width, height, duration, fps, audio, alpha, keptOriginal, warnings }`                                                          |
 | `json.minifyJson(data)`                        | A buffer. Throws on invalid JSON.                                                                                                               |
 | `xml.minifyXml(data, options)`                 | A buffer.                                                                                                                                       |

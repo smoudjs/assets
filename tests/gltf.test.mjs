@@ -70,7 +70,10 @@ describe('gltf: forms and companions', () => {
       actions: [
         { action: 'gltf', source: 'models/crate/crate.gltf' },
         { action: 'image', source: 'models/**/*.png' },
-        { action: 'copy', source: { include: '#rest', exclude: ['audio', 'images', 'sprites', 'tiles', 'spine', 'data'] } }
+        {
+          action: 'copy',
+          source: { include: '#rest', exclude: ['audio', 'images', 'sprites', 'tiles', 'spine', 'data', 'fonts'] }
+        }
       ]
     });
     assert.equal(result.ok, true, result.errors.join('\n'));

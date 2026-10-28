@@ -13,6 +13,7 @@ import { atlas as atlasAction } from './actions/atlas.js';
 import { audio as audioAction } from './actions/audio.js';
 import { audiosprite as audiospriteAction } from './actions/audiosprite.js';
 import { copy as copyAction } from './actions/copy.js';
+import { font as fontAction } from './actions/font.js';
 import { gltf as gltfAction } from './actions/gltf.js';
 import { image as imageAction } from './actions/image.js';
 import { json as jsonAction } from './actions/json.js';
@@ -27,6 +28,7 @@ export const atlas = actions.register(atlasAction);
 export const audio = actions.register(audioAction);
 export const audiosprite = actions.register(audiospriteAction);
 export const video = actions.register(videoAction);
+export const font = actions.register(fontAction);
 export const gltf = actions.register(gltfAction);
 export const meshopt = actions.register(meshoptAction);
 export const spine = actions.register(spineAction);
@@ -58,6 +60,7 @@ export {
   type AudioSpriteSound,
   type PackedAudioSprite
 } from './actions/audiosprite.js';
+export { type FontAction, type FontOptions, type OptimizedFont } from './actions/font.js';
 export { type GltfAction, type GltfFile, type GltfInput, type GltfOptions, type OptimizedGltf } from './actions/gltf.js';
 export { type ImageAction, type ImageOptions, type OptimizedImage, type ResizeOptions } from './actions/image.js';
 export { type JsonAction } from './actions/json.js';
