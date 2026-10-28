@@ -40,7 +40,7 @@ async function main() {
       source: `${source}/audio/sfx`,
       destination: { folder: `${destination}/audio`, filename: '[name]-phaser[ext]' },
       format: 'ogg',
-      json: 'phaser'
+      data: 'phaser'
     }),
     await gltf.process({ source: `${source}/models/crate`, destination: `${destination}/models/crate`, format: 'glb' }),
     await gltf.process({

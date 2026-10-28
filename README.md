@@ -437,22 +437,34 @@ Good to know:
 
 ### atlas
 
-Packs images into one or more pages, with a JSON per page in the TexturePacker "JSON hash" format. PixiJS, Phaser, Babylon.js, PlayCanvas and most other engines load it directly. Takes `png`, `jpg`, `jpeg`, `webp`, `gif` (first frame), `avif`, `tif`, `tiff`.
+Packs images into one or more pages, with a data file per page. By default it is TexturePacker JSON, which PixiJS, Phaser, Babylon.js, PlayCanvas and most other engines load directly. Takes `png`, `jpg`, `jpeg`, `webp`, `gif` (first frame), `avif`, `tif`, `tiff`.
 
 ```json
 { "action": "atlas", "source": "sprites", "padding": 2, "extrude": 1 }
 ```
 
-| Option       | What it does                                                          | Default |
-| ------------ | --------------------------------------------------------------------- | ------- |
-| `maxWidth`   | Widest page in pixels. What does not fit goes to the next page.       | `2048`  |
-| `maxHeight`  | Tallest page in pixels.                                               | `2048`  |
-| `padding`    | Empty pixels between sprites and to the page edge.                    | `2`     |
-| `extrude`    | Repeat each sprite's edge pixels this far outwards, against bleeding. | `0`     |
-| `trim`       | Cut transparent borders. Frames keep their original size and offset.  | `true`  |
-| `powerOfTwo` | Round page sizes up to a power of two.                                | `false` |
-| `format`     | Page format: `png`, `jpeg`, `webp`, `avif`.                           | `png`   |
-| `quality`    | 1 to 100. For png pages, setting it switches to palette compression.  | not set |
+| Option       | What it does                                                          | Default     |
+| ------------ | --------------------------------------------------------------------- | ----------- |
+| `maxWidth`   | Widest page in pixels. What does not fit goes to the next page.       | `2048`      |
+| `maxHeight`  | Tallest page in pixels.                                               | `2048`      |
+| `padding`    | Empty pixels between sprites and to the page edge.                    | `2`         |
+| `extrude`    | Repeat each sprite's edge pixels this far outwards, against bleeding. | `0`         |
+| `trim`       | Cut transparent borders. Frames keep their original size and offset.  | `true`      |
+| `scale`      | Shrink every sprite before packing, 0 to 1. The frames follow.        | `1`         |
+| `extensions` | Keep file extensions in frame names, like `hero/idle_01.png`.         | `false`     |
+| `powerOfTwo` | Round page sizes up to a power of two.                                | `false`     |
+| `format`     | Page format: `png`, `jpeg`, `webp`, `avif`.                           | `png`       |
+| `quality`    | 1 to 100. For png pages, setting it switches to palette compression.  | not set     |
+| `data`       | Layout of the data file, see the table below.                         | `json-hash` |
+
+`data` layouts:
+
+| Value        | What it writes                                                                         |
+| ------------ | -------------------------------------------------------------------------------------- |
+| `json-hash`  | TexturePacker JSON hash, shown below. PixiJS, Phaser, Babylon.js, PlayCanvas.          |
+| `json-array` | TexturePacker JSON array: the frames as a list, each with a `filename`. Phaser, Cocos. |
+| `json`       | Your own loader: `[{ name, x, y, width, height }]`                                     |
+| `css`        | HTML elements: one class per frame with `background`, `width` and `height`.            |
 
 `"source": "sprites"` writes `sprites.png` and `sprites.json`. `"destination": { "filename": "world" }` names them `world.png` and `world.json`. Frame names are the paths inside the selected folder without the extension, like `hero/idle_01`:
 
@@ -473,8 +485,10 @@ Packs images into one or more pages, with a JSON per page in the TexturePacker "
 
 Good to know:
 
-- When sprites do not fit one page, pages are numbered: `sprites_1.png`, `sprites_2.png`. Each JSON lists the others under `meta.related_multi_packs`.
-- With a `[hash]` filename template, a page and its JSON get the same hash.
+- When sprites do not fit one page, pages are numbered: `sprites_1.png`, `sprites_2.png`. Each TexturePacker JSON lists the others under `meta.related_multi_packs`.
+- `scale` is written to `meta.scale`. PixiJS reads it and shows the sprites at their original size.
+- With `css`, a frame name becomes a class: `hero/idle_01` is `.hero_idle_01`.
+- With a `[hash]` filename template, a page and its data file get the same hash.
 - png pages are lossless unless you set `quality`. With `quality` they are reduced to at most 256 colours, which makes them much smaller.
 - Without `quality`, jpeg and webp pages use 80 and avif pages 50, like the `image` action.
 - The same input always gives identical bytes. Frames are never rotated.
@@ -527,9 +541,9 @@ Joins many sounds into one file with silence between them, plus a JSON that tell
 | `channels`   | `1` or `2`. Never more than the sounds have.                          | from the sounds |
 | `sampleRate` | As in [audio](#audio). Never above the sounds.                        | from the sounds |
 | `gap`        | Seconds of silence between sounds, so one never bleeds into the next. | `0.25`          |
-| `json`       | Layout of the JSON, see the table below.                              | `howler`        |
+| `data`       | Layout of the JSON, see the table below.                              | `howler`        |
 
-`json` layouts:
+`data` layouts:
 
 | Value     | What it writes                                                                                  | Times in |
 | --------- | ----------------------------------------------------------------------------------------------- | -------- |
@@ -537,7 +551,7 @@ Joins many sounds into one file with silence between them, plus a JSON that tell
 | `howler1` | Howler 1: `{ urls: [file], sprite: { name: [start, duration] } }`                               | ms       |
 | `phaser`  | Phaser 3 `load.audioSprite`: `{ resources: [file], spritemap: { name: { start, end, loop } } }` | seconds  |
 | `pixi`    | PixiJS Sound `sound.add`: `{ url: file, sprites: { name: { start, end } } }`                    | seconds  |
-| `raw`     | Your own loader: `{ file, sounds: { name: { start, duration } } }`                              | seconds  |
+| `json`    | Your own loader: `[{ name, start, duration }]`                                                  | ms       |
 
 Good to know:
 

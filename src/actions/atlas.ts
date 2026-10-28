@@ -1,4 +1,5 @@
-// Packs sprites into pages and writes a TexturePacker-style JSON (hash format) next to each page.
+// Packs sprites into pages and writes a data file next to each page: TexturePacker JSON hash or array, a plain
+// JSON list, or CSS.
 // Sharp only decodes the sprites and encodes the pages; trimming, extruding and placing are plain buffer
 // copies, so a frame cut back out of a page is pixel-identical to its trimmed source.
 
@@ -10,8 +11,12 @@ import { contentHash } from '../utils/fs.js';
 
 type PageFormat = 'png' | 'jpeg' | 'webp' | 'avif';
 const EXTENSIONS: Record<PageFormat, string> = { png: '.png', jpeg: '.jpg', webp: '.webp', avif: '.avif' };
+type DataFormat = 'json-hash' | 'json-array' | 'json' | 'css';
 
 export interface AtlasOptions extends Record<string, unknown> {
+  data: DataFormat;
+  scale: number;
+  extensions: boolean;
   maxWidth: number;
   maxHeight: number;
   padding: number;
@@ -65,6 +70,20 @@ export interface AtlasAction extends ActionDefinition<AtlasOptions> {
 }
 
 const options: OptionTable = {
+  data: {
+    kind: 'enum',
+    values: ['json-hash', 'json-array', 'json', 'css'],
+    description: 'Data file per page: TexturePacker JSON hash or array, a plain JSON list of frames, or CSS classes',
+    default: 'json-hash'
+  },
+  scale: {
+    kind: 'number',
+    description: 'Shrink every sprite before packing, 0 to 1; the page and the frames follow',
+    min: 0.01,
+    max: 1,
+    default: 1
+  },
+  extensions: { kind: 'boolean', description: 'Keep file extensions in frame names, like hero.png', default: false },
   maxWidth: {
     kind: 'number',
     description: 'Widest page in px; sprites that do not fit go to a second page',
@@ -99,7 +118,7 @@ const options: OptionTable = {
 export const atlas: AtlasAction = {
   name: 'atlas',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 1,
+  version: 2,
   cache: 'together',
   accepts: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'tif', 'tiff'],
   options,
@@ -118,7 +137,7 @@ export const atlas: AtlasAction = {
       }
       names.add(sprite.name);
       try {
-        decoded.push(await decodeSprite(sprite, options.trim, warnings));
+        decoded.push(await decodeSprite(sprite, options, warnings));
       } catch (error) {
         errors.push({ sprite: sprite.name, message: (error as Error).message });
       }
@@ -143,7 +162,7 @@ export const atlas: AtlasAction = {
   },
 
   async transform(files, options, { folderName, filenameTemplate }) {
-    const spriteName = (file: AssetFile) => file.path.replace(/\.[^./]+$/, '');
+    const spriteName = (file: AssetFile) => (options.extensions ? file.path : file.path.replace(/\.[^./]+$/, ''));
     const packed = await atlas.packAtlas(
       files.map((file) => ({ name: spriteName(file), data: file.data })),
       options
@@ -167,29 +186,22 @@ export const atlas: AtlasAction = {
           animated: false
         }
       };
-      // the JSON borrows the image's hash, so both get the same name under a [hash] filename template
-      const json: AssetFile = {
-        path: `${stem}.json`,
+      // the data file borrows the image's hash, so both get the same name under a [hash] filename template
+      const description: AssetFile = {
+        path: stem + (options.data === 'css' ? '.css' : '.json'),
         data: Buffer.alloc(0),
         meta: { size: 0 },
         filenameTokens: { hash: contentHash(page.image) }
       };
-      return { page, image, json };
+      return { page, image, description };
     });
     const outputs: AssetFile[] = [];
-    for (const { page, image, json } of pages) {
+    for (const { page, image, description } of pages) {
       const others = pages
-        .filter((other) => other.json !== json)
-        .map((other) => destinationPath(other.json, filenameTemplate));
-      const meta: Record<string, unknown> = {
-        image: destinationPath(image, filenameTemplate),
-        format: 'RGBA8888',
-        size: { w: page.width, h: page.height },
-        scale: '1'
-      };
-      if (others.length) meta['related_multi_packs'] = others;
-      json.data = Buffer.from(JSON.stringify({ frames: page.frames, meta }));
-      outputs.push(image, json);
+        .filter((other) => other.description !== description)
+        .map((other) => destinationPath(other.description, filenameTemplate));
+      description.data = Buffer.from(describePage(page, destinationPath(image, filenameTemplate), others, options));
+      outputs.push(image, description);
     }
     return { outputs, warnings: packed.warnings, errors };
   }
@@ -215,23 +227,34 @@ interface Sprite {
   offsetY: number;
 }
 
-async function decodeSprite(sprite: AtlasSprite, trim: boolean, warnings: string[]): Promise<Sprite> {
+async function decodeSprite(sprite: AtlasSprite, options: AtlasOptions, warnings: string[]): Promise<Sprite> {
   const { data, info } = await sharp(sprite.data).rotate().ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let region: Region = { left: 0, top: 0, width: info.width, height: info.height };
-  if (trim) {
+  if (options.trim) {
     const visible = visibleRegion(data, info.width, info.height);
     if (!visible) warnings.push(`${sprite.name} is fully transparent; kept as a 1×1 frame`);
     region = visible ?? { left: 0, top: 0, width: 1, height: 1 };
   }
+  // scaled after trimming: resampling spreads faint alpha into transparent borders, and trimming would keep them
+  const { scale } = options;
+  let pixels = cropPixels(data, info.width, region);
+  const width = Math.max(1, Math.round(region.width * scale));
+  const height = Math.max(1, Math.round(region.height * scale));
+  if (scale < 1) {
+    pixels = await sharp(pixels, { raw: { width: region.width, height: region.height, channels: 4 } })
+      .resize(width, height, { fit: 'fill' })
+      .raw()
+      .toBuffer();
+  }
   return {
     name: sprite.name,
-    pixels: cropPixels(data, info.width, region),
-    width: region.width,
-    height: region.height,
-    sourceWidth: info.width,
-    sourceHeight: info.height,
-    offsetX: region.left,
-    offsetY: region.top
+    pixels,
+    width,
+    height,
+    sourceWidth: Math.max(1, Math.round(info.width * scale)),
+    sourceHeight: Math.max(1, Math.round(info.height * scale)),
+    offsetX: Math.round(region.left * scale),
+    offsetY: Math.round(region.top * scale)
   };
 }
 
@@ -424,6 +447,34 @@ function encodePage(pixels: Buffer, page: Page, options: AtlasOptions): Promise<
     case 'avif':
       return pipeline.avif({ quality: quality ?? QUALITY_WHEN_UNSET.avif }).toBuffer();
   }
+}
+
+/** The data file of a page in the `data` layout. `others` are the data files of the other pages. */
+function describePage(page: AtlasPage, image: string, others: string[], options: AtlasOptions): string {
+  const frames = Object.entries(page.frames);
+  switch (options.data) {
+    case 'json':
+      return JSON.stringify(
+        frames.map(([name, { frame }]) => ({ name, x: frame.x, y: frame.y, width: frame.w, height: frame.h }))
+      );
+    case 'css':
+      // a class allows letters, digits, _ and -, and cannot start with a digit
+      return frames
+        .map(([name, { frame }]) => {
+          const className = name.replace(/[^\w-]/g, '_').replace(/^(?=\d)/, '_');
+          return `.${className}{background:url('${image}') no-repeat ${-frame.x}px ${-frame.y}px;width:${frame.w}px;height:${frame.h}px}`;
+        })
+        .join('\n');
+  }
+  const meta: Record<string, unknown> = {
+    image,
+    format: 'RGBA8888',
+    size: { w: page.width, h: page.height },
+    scale: String(options.scale)
+  };
+  if (others.length) meta['related_multi_packs'] = others;
+  const list = options.data === 'json-array' ? frames.map(([filename, frame]) => ({ filename, ...frame })) : page.frames;
+  return JSON.stringify({ frames: list, meta });
 }
 
 /** The frames of a page in TexturePacker JSON hash form, sorted by name for stable output. */

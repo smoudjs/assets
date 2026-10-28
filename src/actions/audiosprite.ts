@@ -13,7 +13,7 @@ import { audio } from './audio.js';
 import { resolveOptions } from './index.js';
 
 type Format = 'mp3' | 'ogg' | 'opus' | 'm4a' | 'wav';
-type JsonFormat = 'howler' | 'howler1' | 'phaser' | 'pixi' | 'raw';
+type DataFormat = 'howler' | 'howler1' | 'phaser' | 'pixi' | 'json';
 const SAMPLE_RATES = [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000];
 
 export interface AudioSpriteOptions extends Record<string, unknown> {
@@ -23,7 +23,7 @@ export interface AudioSpriteOptions extends Record<string, unknown> {
   channels?: 1 | 2;
   sampleRate?: number;
   gap: number;
-  json: JsonFormat;
+  data: DataFormat;
 }
 
 /** A sound going into `packAudioSprite`. */
@@ -92,9 +92,9 @@ const options: OptionTable = {
     max: 10,
     default: 0.25
   },
-  json: {
+  data: {
     kind: 'enum',
-    values: ['howler', 'howler1', 'phaser', 'pixi', 'raw'],
+    values: ['howler', 'howler1', 'phaser', 'pixi', 'json'],
     description: 'JSON layout: Howler 2, Howler 1, Phaser 3, PixiJS Sound, or plain start and duration',
     default: 'howler'
   }
@@ -104,7 +104,7 @@ const options: OptionTable = {
 export const audiosprite: AudioSpriteAction = {
   name: 'audiosprite',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 1,
+  version: 2,
   cache: 'together',
   accepts: audio.accepts,
   options,
@@ -195,7 +195,7 @@ export const audiosprite: AudioSpriteAction = {
     };
     const json: AssetFile = {
       path: `${name}.json`,
-      data: Buffer.from(JSON.stringify(spriteJson(options.json, destinationPath(sound, filenameTemplate), packed.sounds))),
+      data: Buffer.from(JSON.stringify(spriteJson(options.data, destinationPath(sound, filenameTemplate), packed.sounds))),
       meta: { size: 0 },
       // the JSON borrows the sound's hash, so both get the same name under a [hash] filename template
       filenameTokens: { hash: contentHash(data) }
@@ -241,8 +241,8 @@ function wavFile(pcm: Buffer, channels: number, sampleRate: number): Buffer {
   return Buffer.concat([header, pcm]);
 }
 
-// Howler counts in milliseconds; Phaser, PixiJS Sound and raw in seconds
-function spriteJson(layout: JsonFormat, file: string, sounds: AudioSpriteEntry[]): unknown {
+// Howler and plain json count in milliseconds; Phaser and PixiJS Sound in seconds
+function spriteJson(layout: DataFormat, file: string, sounds: AudioSpriteEntry[]): unknown {
   const byName = <T>(value: (sound: AudioSpriteEntry) => T) =>
     Object.fromEntries(sounds.map((sound) => [sound.name, value(sound)]));
   const seconds = (ms: number) => ms / 1000;
@@ -265,7 +265,7 @@ function spriteJson(layout: JsonFormat, file: string, sounds: AudioSpriteEntry[]
         url: file,
         sprites: byName((sound) => ({ start: seconds(sound.start), end: seconds(sound.start + sound.duration) }))
       };
-    case 'raw':
-      return { file, sounds: byName((sound) => ({ start: seconds(sound.start), duration: seconds(sound.duration) })) };
+    case 'json':
+      return sounds.map(({ name, start, duration }) => ({ name, start, duration }));
   }
 }

@@ -42,11 +42,11 @@ describe('audiosprite: output', () => {
     }
   });
 
-  it('writes every json layout', async () => {
+  it('writes every data layout', async () => {
     const source = ['audio/sfx/click.wav', 'audio/sfx/coin.wav'];
     const layouts = {};
-    for (const layout of ['howler', 'howler1', 'phaser', 'pixi', 'raw']) {
-      const build = await run({ actions: [{ action: 'audiosprite', source, format: 'wav', json: layout }] });
+    for (const layout of ['howler', 'howler1', 'phaser', 'pixi', 'json']) {
+      const build = await run({ actions: [{ action: 'audiosprite', source, format: 'wav', data: layout }] });
       layouts[layout] = await json(build, 'sfx.json');
     }
     assert.deepEqual(layouts.howler, { src: ['sfx.wav'], sprite: { click: [0, 200], coin: [450, 100] } });
@@ -59,10 +59,10 @@ describe('audiosprite: output', () => {
       url: 'sfx.wav',
       sprites: { click: { start: 0, end: 0.2 }, coin: { start: 0.45, end: 0.55 } }
     });
-    assert.deepEqual(layouts.raw, {
-      file: 'sfx.wav',
-      sounds: { click: { start: 0, duration: 0.2 }, coin: { start: 0.45, duration: 0.1 } }
-    });
+    assert.deepEqual(layouts.json, [
+      { name: 'click', start: 0, duration: 200 },
+      { name: 'coin', start: 450, duration: 100 }
+    ]);
   });
 
   it('a filename template renames both files, with one shared [hash], and the JSON points at the renamed sound', async () => {

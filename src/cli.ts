@@ -13,7 +13,7 @@ import { watch } from './watch.js';
 const COMMANDS = ['build', 'watch', 'init'];
 
 const HELP = `smoud-assets v${version}
-One config. One command. All your game assets optimized.
+Optimize every game asset with one command.
 
 Usage
   smoud-assets <command> [options]

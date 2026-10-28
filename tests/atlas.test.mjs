@@ -78,6 +78,27 @@ describe('atlas', () => {
     }
   });
 
+  it('scale shrinks every sprite before packing, and the frames and meta.scale follow', async () => {
+    const { read } = await run({ actions: [{ action: 'atlas', source: 'tiles', trim: false, scale: 0.5 }] });
+    const data = parse(await read('tiles.json'));
+    assert.equal(data.meta.scale, '0.5');
+    for (const frame of Object.values(data.frames)) {
+      assert.deepEqual(frame.sourceSize, { w: 16, h: 16 });
+      assert.deepEqual([frame.frame.w, frame.frame.h], [16, 16]);
+    }
+    const { width, height } = await size(await read('tiles.png'));
+    assert.deepEqual(data.meta.size, { w: width, h: height });
+  });
+
+  it('extensions keeps the file extension in frame names', async () => {
+    const { read } = await run({ actions: [{ action: 'atlas', source: 'tiles', extensions: true }] });
+    assert.deepEqual(Object.keys(parse(await read('tiles.json')).frames), [
+      'ground/dirt.png',
+      'ground/grass.png',
+      'walls/brick.png'
+    ]);
+  });
+
   it('powerOfTwo rounds pages up, a filename template and format pick the output files', async () => {
     const { outputs, read } = await run({
       actions: [{ action: 'atlas', source: 'tiles', powerOfTwo: true, format: 'webp', destination: { filename: 'world' } }]
