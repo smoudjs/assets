@@ -16,7 +16,7 @@ type DataFormat = 'json-hash' | 'json-array' | 'json' | 'css';
 export interface AtlasOptions extends Record<string, unknown> {
   data: DataFormat;
   scale: number;
-  extensions: boolean;
+  keepExtensions: boolean;
   maxWidth: number;
   maxHeight: number;
   padding: number;
@@ -83,7 +83,7 @@ const options: OptionTable = {
     max: 1,
     default: 1
   },
-  extensions: { kind: 'boolean', description: 'Keep file extensions in frame names, like hero.png', default: false },
+  keepExtensions: { kind: 'boolean', description: 'Keep file extensions in frame names, like hero.png', default: false },
   maxWidth: {
     kind: 'number',
     description: 'Widest page in px; sprites that do not fit go to a second page',
@@ -162,7 +162,7 @@ export const atlas: AtlasAction = {
   },
 
   async transform(files, options, { folderName, filenameTemplate }) {
-    const spriteName = (file: AssetFile) => (options.extensions ? file.path : file.path.replace(/\.[^./]+$/, ''));
+    const spriteName = (file: AssetFile) => (options.keepExtensions ? file.path : file.path.replace(/\.[^./]+$/, ''));
     const packed = await atlas.packAtlas(
       files.map((file) => ({ name: spriteName(file), data: file.data })),
       options

@@ -90,8 +90,8 @@ describe('atlas', () => {
     assert.deepEqual(data.meta.size, { w: width, h: height });
   });
 
-  it('extensions keeps the file extension in frame names', async () => {
-    const { read } = await run({ actions: [{ action: 'atlas', source: 'tiles', extensions: true }] });
+  it('keepExtensions keeps the file extension in frame names', async () => {
+    const { read } = await run({ actions: [{ action: 'atlas', source: 'tiles', keepExtensions: true }] });
     assert.deepEqual(Object.keys(parse(await read('tiles.json')).frames), [
       'ground/dirt.png',
       'ground/grass.png',

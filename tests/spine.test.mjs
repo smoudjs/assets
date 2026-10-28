@@ -89,7 +89,9 @@ describe('spine: skeleton', () => {
     assert.equal(JSON.parse(text).animations.idle.bones.head.rotate[0].time, 0.3);
   });
 
-  it('animations include and exclude take names and patterns', async () => {
+  it('animations false removes them all; include and exclude take names and patterns', async () => {
+    const none = await run(spineOnly({ animations: false }));
+    assert.equal(JSON.parse(await none.read('spine/hero/hero.json')).animations, undefined);
     assert.deepEqual(await animationsOf((await run(spineOnly({ animations: { include: ['run*'] } }))).read), [
       'run_fast',
       'run_slow'

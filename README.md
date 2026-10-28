@@ -447,19 +447,19 @@ Packs images into one or more pages, with a data file per page. By default it is
 { "action": "atlas", "source": "sprites", "padding": 2, "extrude": 1 }
 ```
 
-| Option       | What it does                                                          | Default     |
-| ------------ | --------------------------------------------------------------------- | ----------- |
-| `maxWidth`   | Widest page in pixels. What does not fit goes to the next page.       | `2048`      |
-| `maxHeight`  | Tallest page in pixels.                                               | `2048`      |
-| `padding`    | Empty pixels between sprites and to the page edge.                    | `2`         |
-| `extrude`    | Repeat each sprite's edge pixels this far outwards, against bleeding. | `0`         |
-| `trim`       | Cut transparent borders. Frames keep their original size and offset.  | `true`      |
-| `scale`      | Shrink every sprite before packing, 0 to 1. The frames follow.        | `1`         |
-| `extensions` | Keep file extensions in frame names, like `hero/idle_01.png`.         | `false`     |
-| `powerOfTwo` | Round page sizes up to a power of two.                                | `false`     |
-| `format`     | Page format: `png`, `jpeg`, `webp`, `avif`.                           | `png`       |
-| `quality`    | 1 to 100. For png pages, setting it switches to palette compression.  | not set     |
-| `data`       | Layout of the data file, see the table below.                         | `json-hash` |
+| Option           | What it does                                                          | Default     |
+| ---------------- | --------------------------------------------------------------------- | ----------- |
+| `maxWidth`       | Widest page in pixels. What does not fit goes to the next page.       | `2048`      |
+| `maxHeight`      | Tallest page in pixels.                                               | `2048`      |
+| `padding`        | Empty pixels between sprites and to the page edge.                    | `2`         |
+| `extrude`        | Repeat each sprite's edge pixels this far outwards, against bleeding. | `0`         |
+| `trim`           | Cut transparent borders. Frames keep their original size and offset.  | `true`      |
+| `scale`          | Shrink every sprite before packing, 0 to 1. The frames follow.        | `1`         |
+| `keepExtensions` | Keep file extensions in frame names, like `hero/idle_01.png`.         | `false`     |
+| `powerOfTwo`     | Round page sizes up to a power of two.                                | `false`     |
+| `format`         | Page format: `png`, `jpeg`, `webp`, `avif`.                           | `png`       |
+| `quality`        | 1 to 100. For png pages, setting it switches to palette compression.  | not set     |
+| `data`           | Layout of the data file, see the table below.                         | `json-hash` |
 
 `data` layouts:
 
@@ -587,7 +587,7 @@ Optimizes glTF models, `.glb` and `.gltf`. Everything it writes loads in any eng
 | `uvs`                    | `false` removes them, and the textures with them.                       | `true`        |
 | `vertexColors`           | `false` removes them.                                                   | `true`        |
 | `materials`              | `false` removes them, and the textures with them.                       | `true`        |
-| `animations`             | `false` removes them.                                                   | `true`        |
+| `animations`             | `false` removes them, or pick them by name, see below.                  | `true`        |
 | `resample`               | Remove animation keyframes that change nothing, see below.              | `true`        |
 | `removeUnusedAttributes` | Remove vertex attributes no material uses, like UVs without a texture.  | `false`       |
 | `keepSmaller`            | Keep the original when cleanup alone would not make it smaller.         | `true`        |
@@ -608,6 +608,10 @@ Optimizes glTF models, `.glb` and `.gltf`. Everything it writes loads in any eng
 - `true`: removes keyframes that the ones around them already give, within `0.0001`. Baked animations often shrink a lot.
 - `{ "tolerance": 0.001 }`: removes more. A higher tolerance can change the motion slightly.
 - `false`: keeps every keyframe.
+
+`animations`:
+
+- `{ "include": ["idle", "run*"] }` keeps only these clips, `{ "exclude": ["debug*"] }` removes these. Names or patterns, not both. Bones stay.
 
 LODs are one action per level:
 
@@ -666,15 +670,15 @@ Optimizes Spine exports. Takes `.atlas` files. The pages an atlas names and the 
 { "action": "spine", "source": "spine", "format": "webp", "quality": 70, "animations": { "exclude": ["debug/*"] } }
 ```
 
-| Option       | What it does                                                                                | Default       |
-| ------------ | ------------------------------------------------------------------------------------------- | ------------- |
-| `format`     | Page format: `png`, `jpeg`, `webp`, `avif`. The `.atlas` is rewritten to match.             | as the source |
-| `quality`    | 1 to 100. For png pages, setting it switches to palette compression.                        | not set       |
-| `scale`      | Shrink pages, 0 to 1. Every coordinate in the `.atlas` scales with them.                    | `1`           |
-| `maxWidth`   | Shrink pages wider than this. Their coordinates in the `.atlas` follow.                     | none          |
-| `maxHeight`  | Shrink pages taller than this. Their coordinates in the `.atlas` follow.                    | none          |
-| `precision`  | Decimals kept for numbers in the skeleton `.json`.                                          | `3`           |
-| `animations` | `{ "include": [...] }` or `{ "exclude": [...] }`: names or patterns, like `run*`. Not both. | all kept      |
+| Option       | What it does                                                                               | Default       |
+| ------------ | ------------------------------------------------------------------------------------------ | ------------- |
+| `format`     | Page format: `png`, `jpeg`, `webp`, `avif`. The `.atlas` is rewritten to match.            | as the source |
+| `quality`    | 1 to 100. For png pages, setting it switches to palette compression.                       | not set       |
+| `scale`      | Shrink pages, 0 to 1. Every coordinate in the `.atlas` scales with them.                   | `1`           |
+| `maxWidth`   | Shrink pages wider than this. Their coordinates in the `.atlas` follow.                    | none          |
+| `maxHeight`  | Shrink pages taller than this. Their coordinates in the `.atlas` follow.                   | none          |
+| `precision`  | Decimals kept for numbers in the skeleton `.json`.                                         | `3`           |
+| `animations` | `false`, `{ "include": [...] }` or `{ "exclude": [...] }`: names or patterns, like `run*`. | all kept      |
 
 Good to know:
 

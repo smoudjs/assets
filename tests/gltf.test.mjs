@@ -152,6 +152,31 @@ describe('gltf: cleanup and removals', () => {
     assert.ok(attributes(modelJson(await read('models/crate.glb'))).includes('TEXCOORD_0'));
   });
 
+  it('animations keeps or removes clips by name or pattern', async () => {
+    const { Document, NodeIO } = await import('@gltf-transform/core');
+    const doc = new Document();
+    const buffer = doc.createBuffer();
+    const accessor = (type, array) => doc.createAccessor().setType(type).setArray(array).setBuffer(buffer);
+    const node = doc.createNode('hero');
+    doc.createScene().addChild(node);
+    for (const name of ['idle', 'run_fast', 'run_slow']) {
+      const sampler = doc
+        .createAnimationSampler()
+        .setInput(accessor('SCALAR', new Float32Array([0, 1])))
+        .setOutput(accessor('VEC3', new Float32Array([0, 0, 0, 1, 0, 0])));
+      const channel = doc.createAnimationChannel().setTargetNode(node).setTargetPath('translation').setSampler(sampler);
+      doc.createAnimation(name).addSampler(sampler).addChannel(channel);
+    }
+    const data = Buffer.from(await new NodeIO().writeBinary(doc));
+    const names = async (animations) =>
+      (modelJson((await gltf.optimizeGltf({ data }, { animations })).data).animations ?? []).map((clip) => clip.name);
+
+    assert.deepEqual(await names({ include: ['run*'] }), ['run_fast', 'run_slow']);
+    assert.deepEqual(await names({ exclude: ['run_slow'] }), ['idle', 'run_fast']);
+    assert.deepEqual(await names(false), []);
+    await assert.rejects(gltf.optimizeGltf({ data }, { animations: { include: ['idle'], exclude: ['run*'] } }), /not both/);
+  });
+
   it('resample drops keyframes interpolation already gives, unless turned off', async () => {
     const { Document, NodeIO } = await import('@gltf-transform/core');
     const doc = new Document();

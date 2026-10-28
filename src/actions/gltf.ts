@@ -5,6 +5,7 @@
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import type { Document } from '@gltf-transform/core';
+import picomatch from 'picomatch';
 import { destinationPath } from '../files.js';
 import type { ActionDefinition, AssetFile, AssetMeta, OptionTable, TransformResult } from '../types.js';
 import { basename, dirname, extension, join } from '../utils/fs.js';
@@ -39,7 +40,7 @@ export interface GltfOptions extends Record<string, unknown> {
   uvs: boolean;
   vertexColors: boolean;
   materials: boolean;
-  animations: boolean;
+  animations: boolean | { include?: string[]; exclude?: string[] };
   resample: boolean | { tolerance: number };
   removeUnusedAttributes: boolean;
   keepSmaller: boolean;
@@ -144,7 +145,30 @@ const options: OptionTable = {
   uvs: keep('UVs; without them textures go too'),
   vertexColors: keep('vertex colors'),
   materials: keep('materials; without them textures go'),
-  animations: keep('animations'),
+  animations: {
+    kind: 'oneOf',
+    description: 'Keep animations: true, false, or by name or pattern with include or exclude, not both',
+    oneOf: [
+      { kind: 'boolean', description: 'Keep all, or remove all' },
+      {
+        kind: 'object',
+        description: 'Animations to keep or remove, by name or pattern',
+        properties: {
+          include: {
+            kind: 'list',
+            description: 'Names or patterns to keep',
+            items: { kind: 'string', description: 'A name or pattern' }
+          },
+          exclude: {
+            kind: 'list',
+            description: 'Names or patterns to remove',
+            items: { kind: 'string', description: 'A name or pattern' }
+          }
+        }
+      }
+    ],
+    default: true
+  },
   resample: {
     kind: 'oneOf',
     description: 'Remove animation keyframes that interpolation already gives; false keeps every keyframe',
@@ -183,7 +207,7 @@ const options: OptionTable = {
 export const gltf: GltfAction = {
   name: 'gltf',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 4,
+  version: 5,
   cache: true,
   accepts: ['glb', 'gltf'],
   options,
@@ -494,7 +518,17 @@ function removeData(doc: Document, options: GltfOptions): void {
     for (const texture of root.listTextures()) texture.dispose();
   }
   if (!options.materials) for (const material of root.listMaterials()) material.dispose();
-  if (!options.animations) for (const animation of root.listAnimations()) animation.dispose();
+  const { animations } = options;
+  if (animations === false) for (const animation of root.listAnimations()) animation.dispose();
+  if (typeof animations === 'object') {
+    if (animations.include && animations.exclude) throw new Error('animations takes include or exclude, not both');
+    const wanted = animations.include ?? animations.exclude;
+    if (wanted) {
+      for (const animation of root.listAnimations()) {
+        if (picomatch.isMatch(animation.getName(), wanted) === Boolean(animations.exclude)) animation.dispose();
+      }
+    }
+  }
 }
 
 async function processTextures(doc: Document, modelName: string, options: GltfOptions, tools: GltfTransform) {

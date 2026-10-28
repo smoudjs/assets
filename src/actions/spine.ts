@@ -25,7 +25,7 @@ export interface SpineOptions extends Record<string, unknown> {
   maxWidth?: number;
   maxHeight?: number;
   precision: number;
-  animations: { include?: string[]; exclude?: string[] };
+  animations: boolean | { include?: string[]; exclude?: string[] };
 }
 
 /** A Spine export going into `optimizeSpine`. */
@@ -86,9 +86,17 @@ const options: OptionTable = {
   maxHeight: { kind: 'number', description: 'Shrink pages taller than this; their coordinates follow', min: 1 },
   precision: { kind: 'number', description: 'Decimals kept for numbers in a skeleton .json', min: 0, max: 6, default: 3 },
   animations: {
-    kind: 'object',
-    description: 'Animations a skeleton .json keeps, by name or pattern: include or exclude, not both',
-    properties: { include: patterns, exclude: patterns }
+    kind: 'oneOf',
+    description: 'Animations a skeleton .json keeps: true, false, or by name or pattern with include or exclude, not both',
+    oneOf: [
+      { kind: 'boolean', description: 'Keep all, or remove all' },
+      {
+        kind: 'object',
+        description: 'Animations to keep or remove, by name or pattern',
+        properties: { include: patterns, exclude: patterns }
+      }
+    ],
+    default: true
   }
 };
 
@@ -96,7 +104,7 @@ const options: OptionTable = {
 export const spine: SpineAction = {
   name: 'spine',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 1,
+  version: 2,
   cache: true,
   accepts: ['atlas'],
   options,
@@ -110,7 +118,8 @@ export const spine: SpineAction = {
 
   async optimizeSpine(input, given = {}) {
     const options = resolveOptions<SpineOptions>(spine.options, given);
-    if (options.animations.include && options.animations.exclude) {
+    const { animations } = options;
+    if (typeof animations === 'object' && animations.include && animations.exclude) {
       throw new Error('animations takes include or exclude, not both');
     }
     const text = input.atlas.toString('utf8');
@@ -140,7 +149,7 @@ export const spine: SpineAction = {
         files.push({ name, data: trimSkeleton(name, data, options, warnings) });
         continue;
       }
-      if (!hasJson && (options.animations.include || options.animations.exclude)) {
+      if (!hasJson && animations !== true) {
         warnings.push(`${name}: animations work on a skeleton .json only; a binary .skel is kept as it is`);
       }
       files.push({ name, data });
@@ -266,7 +275,8 @@ function trimSkeleton(name: string, data: Buffer, options: SpineOptions, warning
   }
   if (!json?.skeleton?.spine) return data;
 
-  const { include, exclude } = options.animations;
+  if (options.animations === false) delete json.animations;
+  const { include, exclude } = typeof options.animations === 'object' ? options.animations : {};
   const wanted = include ?? exclude;
   if (wanted) {
     const animations = json.animations ?? {};
