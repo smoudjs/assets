@@ -47,6 +47,27 @@
     },
     { "action": "gltf", "source": "models/crate.glb", "destination": "#compressed" },
     { "action": "meshopt", "source": "#compressed", "destination": "models/compressed" },
+    {
+      "action": "bitmapfont",
+      "source": "fonts/NotoSans-Regular.ttf",
+      "characters": "Play Again!",
+      "size": 48,
+      "outline": { "width": 3 },
+      "shadow": { "x": 12, "y": 3 }
+    },
+    {
+      "action": "bitmapfont",
+      "source": "fonts/NotoSansCFF-Regular.otf",
+      "destination": { "folder": "fonts", "filename": "score[ext]" },
+      "characters": "0123456789",
+      "size": 64,
+      "color": "#ffd400",
+      "outline": { "width": 4, "color": "#7a3b00" },
+      "format": "webp",
+      "data": "text"
+    },
+    { "action": "bitmapfont", "source": "fonts/NotoSans-Regular.ttf", "characters": "Play Again!0123456789", "destination": "#bitmap" },
+    { "action": "bitmapfont", "source": "#bitmap", "characters": "0123456789", "destination": "fonts/digits" },
     { "action": "image", "source": "#rest" }
   ]
 }

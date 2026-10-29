@@ -2,6 +2,7 @@
   "defaults": {
     "image": { "quality": 60, "maxWidth": 2048, "maxHeight": 2048, "webp": { "alphaQuality": 80 } },
     "atlas": { "format": "webp", "quality": 60 },
+    "bitmapfont": { "format": "webp", "quality": 60 },
     "audio": { "format": "mp3", "bitrate": 64, "channels": 1 },
     "font": { "format": "woff2", "removeHinting": true },
     "gltf": { "normals": false, "textures": { "extract": true, "format": "webp", "quality": 60, "maxWidth": 2048, "maxHeight": 2048 } },
@@ -9,6 +10,7 @@
   },
   "actions": [
     "spine",
+    { "action": "bitmapfont", "source": "*.fnt" },
     { "action": "gltf", "source": { "when": { "triangles": ">50000" } }, "simplify": { "ratio": 0.5 } },
     "gltf",
     { "action": "image", "source": { "include": "*.png", "when": { "size": ">300kb" } }, "format": "webp", "quality": 45 },

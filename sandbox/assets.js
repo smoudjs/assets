@@ -1,7 +1,19 @@
 // The sandbox as JavaScript: the same actions as assets.json, called one by one through the public API.
 // Run: npm run sandbox:js
 
-import { atlas, audio, audiosprite, formatReport, gltf, image, json, meshopt, spine, xml } from '../dist/index.js';
+import {
+  atlas,
+  audio,
+  audiosprite,
+  bitmapfont,
+  formatReport,
+  gltf,
+  image,
+  json,
+  meshopt,
+  spine,
+  xml
+} from '../dist/index.js';
 
 const source = 'tests/assets';
 const destination = 'sandbox/compiled-js';
@@ -66,6 +78,35 @@ async function main() {
       destination: `${destination}/spine`,
       format: 'webp',
       animations: { exclude: ['debug/*'] }
+    }),
+    await bitmapfont.process({
+      source: `${source}/fonts/NotoSans-Regular.ttf`,
+      destination: `${destination}/fonts`,
+      characters: 'Play Again!',
+      size: 48,
+      outline: { width: 3 },
+      shadow: { x: 2, y: 3 }
+    }),
+    await bitmapfont.process({
+      source: `${source}/fonts/NotoSansCFF-Regular.otf`,
+      destination: { folder: `${destination}/fonts`, filename: 'score[ext]' },
+      characters: '0123456789',
+      size: 64,
+      color: '#ffd400',
+      outline: { width: 4, color: '#7a3b00' },
+      format: 'webp',
+      data: 'text'
+    }),
+    // a .fnt in memory brings its page along, like "#bitmap" in assets.json
+    await bitmapfont.process({
+      source: (
+        await bitmapfont.process({
+          source: `${source}/fonts/NotoSans-Regular.ttf`,
+          characters: 'Play Again!0123456789'
+        })
+      ).outputs,
+      destination: `${destination}/fonts/digits`,
+      characters: '0123456789'
     }),
     // "#rest" exists only in a build; here the folders handled above are excluded by hand. The crate's texture
     // belongs to its .gltf and the Spine page to its .atlas, so models and spine are left out too

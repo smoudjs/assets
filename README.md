@@ -34,6 +34,7 @@ Making a playable ad? Add `--preset playable` or `--preset playable-max` to conv
   - [meshopt](#meshopt)
   - [spine](#spine)
   - [font](#font)
+  - [bitmapfont](#bitmapfont)
   - [video](#video)
   - [json](#json)
   - [xml](#xml)
@@ -51,7 +52,7 @@ Making a playable ad? Add `--preset playable` or `--preset playable-max` to conv
 - 🔊 **Audio**: mp3, ogg, opus or m4a, mono downmix, bitrate by quality, never above the source. Audio sprites for Howler, Phaser and PixiJS Sound.
 - 🧊 **3D models**: [glTF Transform](https://gltf-transform.dev) and meshoptimizer: dedup, weld, prune, simplify, quantize, texture extraction, meshopt compression.
 - 🦴 **Spine**: pages compressed, converted and scaled with the `.atlas` rewritten, skeleton numbers rounded, animations filtered.
-- ✒️ **Fonts**: [HarfBuzz](https://harfbuzz.github.io) subsetting to the characters you use, WOFF2 and WOFF.
+- ✒️ **Fonts**: [HarfBuzz](https://harfbuzz.github.io) subsetting to the characters you use, WOFF2 and WOFF. Bitmap fonts drawn from any font, with outline and shadow.
 - 🎬 **Video**: mp4 or webm, or animated webp and gif with transparency.
 - 📄 **Data files**: JSON and XML minified.
 - 🎯 **Selection and chaining**: globs, `#rest`, filters on size, image, sound and model facts, virtual `#folders` between actions.
@@ -153,12 +154,12 @@ Each entry in `actions` is one step: which files, what to do, where to put the r
 { "action": "image", "source": "ui", "destination": "interface", "format": "webp", "quality": 80 }
 ```
 
-| Key           | What it does                                                                                                                                          |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `meshopt`, `spine`, `font`, `video`, `json`, `xml`, `copy`, or one you registered. |
-| `source`      | Which files. Omitted: every file the action can handle.                                                                                               |
-| `destination` | Where the results go. Omitted: each result lands where its source was.                                                                                |
-| anything else | Options of the action, see [Action reference](#action-reference).                                                                                     |
+| Key           | What it does                                                                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `action`      | The action name: `image`, `atlas`, `audio`, `audiosprite`, `gltf`, `meshopt`, `spine`, `font`, `bitmapfont`, `video`, `json`, `xml`, `copy`, or one you registered. |
+| `source`      | Which files. Omitted: every file the action can handle.                                                                                                             |
+| `destination` | Where the results go. Omitted: each result lands where its source was.                                                                                              |
+| anything else | Options of the action, see [Action reference](#action-reference).                                                                                                   |
 
 A plain string is an action with default settings: `"image"` equals `{ "action": "image" }`.
 
@@ -305,11 +306,11 @@ The rules:
 
 **Built-in presets:**
 
-| Preset         | What it does                                                                                                                                                                                                                                                                                                     |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default`      | Optimizes models and Spine, compresses images and sounds in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                                                                       |
-| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlases and Spine pages use quality 70. Sounds become mono mp3 at 96 kbps. Models extract their textures. Fonts become woff2. Then json, xml and copy like `default`.                    |
-| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas and Spine pages: webp, quality 60. Sounds become mono mp3 at 64 kbps. Models drop normals, textures become webp, models over 50,000 triangles are halved. Fonts become woff2 without hinting. |
+| Preset         | What it does                                                                                                                                                                                                                                                                                                                  |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `default`      | Optimizes models and Spine, compresses images and sounds in their own format, minifies json and xml, copies everything else, svg included.                                                                                                                                                                                    |
+| `playable`     | For playable ads. Images are shrunk to fit 2048×2048, opaque png becomes jpeg, quality 70, or 50 for files over 400 KB. Atlas, Spine and bitmap font pages use quality 70. Sounds become mono mp3 at 96 kbps. Models extract their textures. Fonts become woff2. Then json, xml and copy like `default`.                      |
+| `playable-max` | Like `playable`, with stronger compression: every png becomes webp, quality 60, or 45 for files over 300 KB. Atlas, Spine and bitmap font pages: webp, quality 60. Sounds become mono mp3 at 64 kbps. Models drop normals, textures become webp, models over 50,000 triangles are halved. Fonts become woff2 without hinting. |
 
 #### Typical results
 
@@ -705,6 +706,31 @@ Keeps only the characters you use, and converts to WOFF2. Takes `ttf`, `otf`, `w
 
 Arial, 1 MB, becomes 37 KB as WOFF2 with Latin letters and digits, or 9 KB without hinting.
 
+### bitmapfont
+
+Draws a font into a BMFont `.fnt` and its page, for `BitmapText` in Phaser and PixiJS. Takes `ttf`, `otf`, `woff`, `woff2`, and text or XML `.fnt` files, whose pages come with them.
+
+```json
+{ "action": "bitmapfont", "source": "fonts/score.ttf", "characters": "0123456789", "size": 48, "outline": { "width": 3 } }
+```
+
+| Option                                           | What it does                                       | Default                   |
+| ------------------------------------------------ | -------------------------------------------------- | ------------------------- |
+| `characters`                                     | Characters to draw or keep.                        | ASCII, or all of a `.fnt` |
+| `size`                                           | Font size in px.                                   | `32`                      |
+| `color`                                          | Glyph colour. White can be tinted in the game.     | `#ffffff`                 |
+| `outline`                                        | `{ "width": 3, "color": "#000000" }`               | none                      |
+| `shadow`                                         | `{ "x": 2, "y": 2, "color": "#000000" }`, no blur. | none                      |
+| `format`                                         | Page format: `png`, `webp`, `avif`.                | `png`, or as the `.fnt`   |
+| `quality`                                        | 1 to 100. For png pages, switches to a palette.    | not set                   |
+| `data`                                           | `xml`, which Phaser needs, or `text`.              | `xml`, or as the `.fnt`   |
+| `padding`, `maxWidth`, `maxHeight`, `powerOfTwo` | As in [atlas](#atlas), when glyphs are packed.     | as in atlas               |
+
+Good to know:
+
+- A `.fnt` keeps its glyphs where they are: pages are only converted. They are repacked when `characters` drops some.
+- `size`, `color`, `outline` and `shadow` apply when drawing from a font. A binary `.fnt` is refused.
+
 ### video
 
 Shrinks and compresses videos. Takes `mp4`, `webm`, `mov`, `m4v`, `mkv`, `avi`, `ogv`.
@@ -755,6 +781,7 @@ import {
   meshopt,
   spine,
   font,
+  bitmapfont,
   video,
   json,
   xml,
@@ -844,6 +871,7 @@ const tight = xml.minifyXml(xmlBuffer, { comments: false });
 | `meshopt.compressGltf(model, options)`         | As `gltf.optimizeGltf`, with the model compressed.                                                                                              |
 | `spine.optimizeSpine(input, options)`          | `{ atlas, files, warnings }`. `files` are the pages and skeleton, by the names the `.atlas` refers to.                                          |
 | `font.optimizeFont(data, options)`             | `{ data, format, keptOriginal }`                                                                                                                |
+| `bitmapfont.makeBitmapFont(input, options)`    | `{ fnt, pages, warnings }`. `input` is `{ data, path }`, plus `files`, the pages by name, for a `.fnt`.                                         |
 | `video.encodeVideo(data, options)`             | `{ data, format, width, height, duration, fps, audio, alpha, keptOriginal, warnings }`                                                          |
 | `json.minifyJson(data)`                        | A buffer. Throws on invalid JSON.                                                                                                               |
 | `xml.minifyXml(data, options)`                 | A buffer.                                                                                                                                       |

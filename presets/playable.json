@@ -2,6 +2,7 @@
   "defaults": {
     "image": { "quality": 70, "maxWidth": 2048, "maxHeight": 2048 },
     "atlas": { "quality": 70 },
+    "bitmapfont": { "quality": 70 },
     "audio": { "format": "mp3", "bitrate": 96, "channels": 1 },
     "font": { "format": "woff2" },
     "gltf": { "textures": { "extract": true, "quality": 70, "maxWidth": 2048, "maxHeight": 2048 } },
@@ -9,6 +10,7 @@
   },
   "actions": [
     "spine",
+    { "action": "bitmapfont", "source": "*.fnt" },
     "gltf",
     {
       "action": "image",

@@ -82,6 +82,7 @@ export const font: FontAction = {
     let sfnt = data;
     if (signature === 'wOF2') sfnt = Buffer.from(await (await import('wawoff2')).decompress(data));
     if (signature === 'wOFF') sfnt = woffToSfnt(data);
+    if (sfnt.toString('latin1', 0, 4) === 'ttcf') throw new Error('it is a font collection, which is not supported');
     const outlines = sfnt.toString('latin1', 0, 4) === 'OTTO' ? 'otf' : 'ttf';
     let sourceFormat: Format = outlines;
     if (signature === 'wOF2') sourceFormat = 'woff2';
@@ -265,6 +266,9 @@ function sfntToWoff(sfnt: Buffer): Buffer {
 
 function woffToSfnt(woff: Buffer): Buffer {
   const numTables = woff.readUInt16BE(12);
+  if (woff.length < 44 + 20 * numTables || woff.readUInt32BE(8) !== woff.length || numTables === 0) {
+    throw new Error('it is a broken WOFF file');
+  }
   const sfnt = Buffer.alloc(woff.readUInt32BE(16));
   const power = 2 ** Math.floor(Math.log2(numTables));
   sfnt.writeUInt32BE(woff.readUInt32BE(4), 0);
