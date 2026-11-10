@@ -72,7 +72,7 @@ export {
 export { type FontAction, type FontOptions, type OptimizedFont } from './actions/font.js';
 export { type GltfAction, type GltfFile, type GltfInput, type GltfOptions, type OptimizedGltf } from './actions/gltf.js';
 export { type ImageAction, type ImageOptions, type OptimizedImage, type ResizeOptions } from './actions/image.js';
-export { type JsonAction } from './actions/json.js';
+export { type JsonAction, type JsonOptions } from './actions/json.js';
 export { type MeshoptAction, type MeshoptOptions } from './actions/meshopt.js';
 export {
   type OptimizedSpine,

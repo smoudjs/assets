@@ -1,6 +1,6 @@
 {
   "name": "@smoud/assets",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "description": "Optimize every game asset with one command. Images, texture atlases, audio and audio sprites, glTF models with meshopt, Spine, fonts and bitmap fonts, video and JSON/XML, each compressed with the right tool. Names and formats stay, no file grows. Playable ad presets for HTML5 games.",
   "keywords": [
     "assets",
@@ -70,6 +70,16 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
+      }
+    },
+    "./runtime": {
+      "import": {
+        "types": "./dist/runtime.d.ts",
+        "default": "./dist/runtime.js"
+      },
+      "require": {
+        "types": "./dist/runtime.d.cts",
+        "default": "./dist/runtime.cjs"
       }
     },
     "./package.json": "./package.json"

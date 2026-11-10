@@ -50,13 +50,19 @@ export async function readConfigFile(file: string): Promise<AssetsConfig> {
 
 /** What a `source` selects, with the `#rest` and `#virtual` forms parsed out. */
 export interface PreparedSource {
+  /** Patterns on the disk. */
   include: string[];
   exclude: string[];
   when?: WhenSpec;
-  /** `"source": "#rest"`: what the actions above left. */
+  /** `"source": "#rest"`: what the actions above left; `include` then holds its sub-pattern. */
   rest: boolean;
-  /** `"source": "#name"` or `"#name/sub/**"`: the virtual folder; `include` then holds the sub-pattern. */
-  virtual?: string;
+  /** `"#name"` or `"#name/sub/**"`, as many as listed: each virtual folder with its sub-pattern, if any. */
+  virtual: { name: string; include: string[] }[];
+}
+
+/** Whether the action selects from the disk: disk patterns, `#rest`, or no virtual folder at all. */
+export function readsDisk(source: PreparedSource): boolean {
+  return source.include.length > 0 || source.rest || source.virtual.length === 0;
 }
 
 export interface PreparedAction {
@@ -296,7 +302,7 @@ function parseDefaults(raw: unknown, where: string, messages: Messages): Default
 }
 
 function parseSource(raw: unknown, where: string, messages: Messages): PreparedSource {
-  const source: PreparedSource = { include: [], exclude: [], rest: false };
+  const source: PreparedSource = { include: [], exclude: [], rest: false, virtual: [] };
   if (raw === undefined) return source;
 
   let include: unknown = raw;
@@ -311,14 +317,21 @@ function parseSource(raw: unknown, where: string, messages: Messages): PreparedS
   }
 
   const patterns = parsePatterns(include, `${where}, source`, messages);
-  const virtual = patterns.find((pattern) => pattern.startsWith('#'));
-  if (virtual === undefined) source.include = patterns;
-  else if (patterns.length > 1) messages.errors.push(`${where}: a "#" source cannot be combined with other patterns`);
-  else {
-    const { name, sub } = parseVirtualFolder(virtual);
-    if (name === 'rest') source.rest = true;
-    else source.virtual = name;
+  // `#rest` filters the disk by what is taken, so it stands alone; virtual folders and disk patterns mix freely
+  const rest = patterns.find((pattern) => pattern === '#rest' || pattern.startsWith('#rest/'));
+  if (rest !== undefined) {
+    if (patterns.length > 1) messages.errors.push(`${where}: "#rest" cannot be combined with other patterns`);
+    source.rest = true;
+    const { sub } = parseVirtualFolder(rest);
     if (sub) source.include = [sub];
+    return source;
+  }
+  for (const pattern of patterns) {
+    if (!pattern.startsWith('#')) source.include.push(pattern);
+    else {
+      const { name, sub } = parseVirtualFolder(pattern);
+      source.virtual.push({ name, include: sub ? [sub] : [] });
+    }
   }
   return source;
 }

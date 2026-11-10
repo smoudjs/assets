@@ -3,8 +3,24 @@
   "destination": "./compiled",
   "ignore": ["generate.mjs"],
   "actions": [
-    { "action": "spine", "source": "spine", "format": "webp", "animations": { "exclude": ["debug/*"] } },
-    "json",
+    { "action": "spine", "source": "spine/hero", "format": "webp", "animations": { "exclude": ["debug/*"] } },
+    {
+      "action": "spine",
+      "source": "spine/knight",
+      "destination": "spine/knight-json",
+      "skins": ["blue"],
+      "animations": { "exclude": ["debug/*"] }
+    },
+    {
+      "action": "spine",
+      "source": "spine/knight",
+      "destination": "spine/knight-skel",
+      "skeleton": "skel",
+      "skins": ["blue"],
+      "animations": { "exclude": ["debug/*"] }
+    },
+    { "action": "json", "source": "data/world.json", "pack": true },
+    { "action": "json", "source": "#rest" },
     "xml",
     { "action": "atlas", "source": "sprites", "extrude": 1 },
     { "action": "atlas", "source": "tiles", "destination": "atlases", "trim": false, "extrude": 2, "powerOfTwo": true },

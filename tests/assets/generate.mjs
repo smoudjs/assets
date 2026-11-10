@@ -176,9 +176,94 @@ await write(
 );
 await write('spine/hero/hero.skel', Buffer.from([0x53, 0x4b, 0x45, 0x4c, 0x00, 0x04, 0x01, 0x00]));
 
+// a Spine 4.2 rig, the version converted between .json and .skel: an atlas in the 4.x format, without indentation;
+// skins over the default one, where blue's scarf is a linked mesh taking its mesh from the shared skin, which a deform
+// in idle animates; animations to keep or drop, with long decimals and a stepped curve
+const KNIGHT_COLORS = [[90, 110, 200, 255], [60, 90, 220, 255], [200, 70, 60, 255], [240, 200, 60, 255]];
+await write('spine/knight/knight.png', await png(paint(80, 32, (x) => KNIGHT_COLORS[Math.min(3, Math.floor(Math.max(0, x - 16) / 16))])));
+await write(
+  'spine/knight/knight.atlas',
+  Buffer.from(
+    'knight.png\nsize:80,32\nfilter:Linear,Linear\npma:false\n' +
+      'body\nbounds:0,0,32,32\ncape-blue\nbounds:32,0,16,32\ncape-red\nbounds:48,0,16,32\nscarf\nbounds:64,0,16,16\n'
+  )
+);
+const sway = (degrees) => ({ rotate: [{ value: 0 }, { time: 0.5, value: degrees, curve: [0.2, 0, 0.3, degrees] }, { time: 1 }] });
+await write(
+  'spine/knight/knight.json',
+  Buffer.from(
+    JSON.stringify(
+      {
+        skeleton: { hash: 'a25pZ2h0MDE', spine: '4.2.43', x: -16, y: 0, width: 32, height: 32 },
+        bones: [{ name: 'root' }, { name: 'body', parent: 'root', y: 16.3333333 }],
+        slots: [
+          { name: 'cape', bone: 'body', attachment: 'cape' },
+          { name: 'body', bone: 'body', attachment: 'body' },
+          { name: 'scarf', bone: 'body', attachment: 'scarf' }
+        ],
+        skins: [
+          { name: 'default', attachments: { body: { body: { width: 32, height: 32 } } } },
+          {
+            name: 'shared',
+            attachments: {
+              scarf: {
+                scarf: {
+                  type: 'mesh',
+                  uvs: [0, 0, 1, 0, 1, 1, 0, 1],
+                  triangles: [0, 1, 2, 2, 3, 0],
+                  vertices: [-8, 8, 8, 8, 8, 24, -8, 24],
+                  hull: 4
+                }
+              }
+            }
+          },
+          {
+            name: 'blue',
+            attachments: {
+              cape: { cape: { path: 'cape-blue', x: -8, width: 16, height: 32 } },
+              scarf: { scarf: { type: 'linkedmesh', skin: 'shared', parent: 'scarf', width: 16, height: 16 } }
+            }
+          },
+          { name: 'red', attachments: { cape: { cape: { path: 'cape-red', x: -8, width: 16, height: 32, color: 'ff8080ff' } } } }
+        ],
+        animations: {
+          idle: {
+            bones: { body: sway(4.4444444) },
+            attachments: { shared: { scarf: { scarf: { deform: [{}, { time: 0.5, vertices: [1, 1] }, { time: 1 }] } } } }
+          },
+          attack: { bones: { body: { translate: [{ x: 1.23456, curve: 'stepped' }, { time: 0.5, x: 2 }] } } },
+          'debug/pose': { bones: { body: sway(90) } }
+        }
+      },
+      null,
+      2
+    )
+  )
+);
+
 // --- data: non-image files for copy and #rest ------------------------------------------------------
 
 await write('data/config.xml', Buffer.from('<?xml version="1.0"?>\n<game>\n  <title>Test</title>\n  <fps>60</fps>\n</game>\n'));
+
+// a world as a level editor saves it: many records with the same keys and strings that repeat, which json pack shrinks
+const TILE_KINDS = ['grass', 'water', 'sand', 'stone'];
+const PROPS = ['tree', 'rock', 'bush'];
+await write(
+  'data/world.json',
+  Buffer.from(
+    JSON.stringify(
+      {
+        name: 'meadow',
+        width: 32,
+        height: 32,
+        tiles: Array.from({ length: 30 }, (_, i) => ({ x: i % 6, y: Math.floor(i / 6), kind: TILE_KINDS[(i * 7) % 4], walkable: i % 5 !== 0 })),
+        props: Array.from({ length: 12 }, (_, i) => ({ type: PROPS[i % 3], position: [(i * 37) % 320, (i * 53) % 320], scale: 1 + (i % 4) / 4 }))
+      },
+      null,
+      2
+    )
+  )
+);
 
 // --- audio: sine tones, each under 20kb so size filters still see noise.png alone --------------------
 // music is longer and stereo, sfx short and mostly mono; every codec the audio action reads appears once

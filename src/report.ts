@@ -60,8 +60,8 @@ export function formatReport(input: ActionResult | ActionResult[] | BuildResult,
   for (const result of results) {
     if (result.memorySource === undefined) {
       cached += result.fromCache;
-      files += result.selected;
-      bytesIn += result.bytesIn;
+      files += result.selected - (result.memoryInputs?.files ?? 0);
+      bytesIn += result.bytesIn - (result.memoryInputs?.bytes ?? 0);
     }
     if (result.destination !== null) bytesOut += result.bytesOut;
     keptOriginals += result.files.filter((row) => row.keptOriginal).length;

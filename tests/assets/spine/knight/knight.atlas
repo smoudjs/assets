@@ -1,0 +1,12 @@
+knight.png
+size:80,32
+filter:Linear,Linear
+pma:false
+body
+bounds:0,0,32,32
+cape-blue
+bounds:32,0,16,32
+cape-red
+bounds:48,0,16,32
+scarf
+bounds:64,0,16,16

@@ -29,10 +29,14 @@ describe('core', () => {
     assert.deepEqual(await outputs(), [
       'data/levels/level_01.json',
       'data/levels/level_02.json',
+      'data/world.json',
       'spine/hero/hero.atlas',
       'spine/hero/hero.json',
       'spine/hero/hero.png',
-      'spine/hero/hero.skel'
+      'spine/hero/hero.skel',
+      'spine/knight/knight.atlas',
+      'spine/knight/knight.json',
+      'spine/knight/knight.png'
     ]);
   });
 
@@ -56,7 +60,13 @@ describe('core', () => {
 
   it('a pattern without a slash matches file names at any depth', async () => {
     const { outputs } = await run({ actions: [{ action: 'copy', source: { include: 'spine', exclude: '*.json' } }] });
-    assert.deepEqual(await outputs(), ['spine/hero/hero.atlas', 'spine/hero/hero.png', 'spine/hero/hero.skel']);
+    assert.deepEqual(await outputs(), [
+      'spine/hero/hero.atlas',
+      'spine/hero/hero.png',
+      'spine/hero/hero.skel',
+      'spine/knight/knight.atlas',
+      'spine/knight/knight.png'
+    ]);
     const pngs = await run({ actions: [{ action: 'copy', source: '*.png', destination: 'flat' }] });
     assert.ok((await pngs.outputs()).includes('flat/tiles/ground/dirt.png'));
   });
@@ -88,7 +98,7 @@ describe('core', () => {
       destination: first.destination,
       actions: [{ action: 'copy', source: 'data' }]
     });
-    assert.deepEqual(await second.outputs(), ['data/config.xml', 'data/levels/level_01.json']);
+    assert.deepEqual(await second.outputs(), ['data/config.xml', 'data/levels/level_01.json', 'data/world.json']);
   });
 
   it('keeps stale output with clean: false', async () => {
@@ -114,6 +124,46 @@ describe('core', () => {
       result.warnings.some((w) => w.includes('#unused')),
       result.warnings.join('\n')
     );
+  });
+
+  it('combines virtual folders with each other and with disk patterns', async () => {
+    const { result, outputs } = await run({
+      actions: [
+        { action: 'copy', source: 'tiles', destination: '#tiles' },
+        { action: 'copy', source: 'data/levels', destination: '#levels' },
+        { action: 'copy', source: ['#tiles/ground/**', '#levels', 'data/config.xml'], destination: 'mixed' }
+      ]
+    });
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    assert.deepEqual(await outputs(), [
+      'mixed/config.xml',
+      'mixed/dirt.png',
+      'mixed/grass.png',
+      'mixed/level_01.json',
+      'mixed/level_02.json'
+    ]);
+    assert.ok(!result.warnings.some((w) => w.includes('nothing reads')), result.warnings.join('\n'));
+    const mixed = result.actions[2];
+    assert.equal(mixed.memorySource, undefined);
+    assert.equal(mixed.memoryInputs.files, 4, 'only the files from virtual folders are memory inputs');
+    assert.equal(mixed.bytesIn - mixed.memoryInputs.bytes, (await readFile(path.join(ASSETS, 'data/config.xml'))).length);
+  });
+
+  it('a source of only virtual folders is all memory, and #rest stands alone', async () => {
+    const { result } = await run({
+      actions: [
+        { action: 'copy', source: 'tiles', destination: '#tiles' },
+        { action: 'copy', source: 'data', destination: '#data' },
+        { action: 'copy', source: ['#tiles', '#data'], destination: 'out' }
+      ]
+    });
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    assert.equal(result.actions[2].memorySource, 'tiles, data');
+    assert.equal(result.actions[2].memoryInputs, undefined);
+
+    const rest = await run({ actions: [{ action: 'copy', source: ['#rest', 'data'] }] });
+    assert.equal(rest.result.ok, false);
+    assert.match(rest.result.errors[0], /"#rest" cannot be combined/);
   });
 
   it('reading a virtual folder before it exists is an error', async () => {

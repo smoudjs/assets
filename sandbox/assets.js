@@ -23,8 +23,10 @@ async function main() {
   const icons = await image.process({ source: `${source}/images/ui/icons`, format: 'png', density: 144 });
 
   const results = [
+    // packed: the game reads it with unpackJson from @smoud/assets/runtime
+    await json.process({ source: `${source}/data/world.json`, destination: `${destination}/data`, pack: true }),
     // the Spine skeleton .json is left to the spine action below
-    await json.process({ source: { include: source, exclude: [`${source}/spine`] }, destination }),
+    await json.process({ source: { include: source, exclude: [`${source}/spine`, `${source}/data/world.json`] }, destination }),
     await xml.process({ source, destination }),
     await atlas.process({ source: `${source}/sprites`, destination, extrude: 1 }),
     await atlas.process({
@@ -74,9 +76,23 @@ async function main() {
       destination: `${destination}/models/compressed`
     }),
     await spine.process({
-      source: `${source}/spine`,
-      destination: `${destination}/spine`,
+      source: `${source}/spine/hero`,
+      destination: `${destination}/spine/hero`,
       format: 'webp',
+      animations: { exclude: ['debug/*'] }
+    }),
+    // the Spine 4.2 knight twice, its skeleton as .json and as .skel
+    await spine.process({
+      source: `${source}/spine/knight`,
+      destination: `${destination}/spine/knight-json`,
+      skins: ['blue'],
+      animations: { exclude: ['debug/*'] }
+    }),
+    await spine.process({
+      source: `${source}/spine/knight`,
+      destination: `${destination}/spine/knight-skel`,
+      skeleton: 'skel',
+      skins: ['blue'],
       animations: { exclude: ['debug/*'] }
     }),
     await bitmapfont.process({

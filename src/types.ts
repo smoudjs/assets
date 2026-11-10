@@ -254,8 +254,10 @@ export interface ActionResult {
   selected: number;
   /** How many of them came from the cache instead of being processed. */
   fromCache: number;
-  /** Set when the files came from memory: the virtual folder's name, or `memory` for files handed in directly. Those bytes are not source bytes. */
+  /** Set when the files came from memory: the virtual folders' names, or `memory` for files handed in directly. Those bytes are not source bytes. */
   memorySource?: string;
+  /** Set when a build mixes virtual folders with files from disk: the part that came from memory, which the total leaves out. */
+  memoryInputs?: { files: number; bytes: number };
   /** One per source file, or one for all of them when the action packs its files into group outputs (atlas). */
   files: FileResult[];
   /** The produced files, in memory. */

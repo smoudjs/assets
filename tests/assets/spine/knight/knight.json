@@ -1,0 +1,212 @@
+{
+  "skeleton": {
+    "hash": "a25pZ2h0MDE",
+    "spine": "4.2.43",
+    "x": -16,
+    "y": 0,
+    "width": 32,
+    "height": 32
+  },
+  "bones": [
+    {
+      "name": "root"
+    },
+    {
+      "name": "body",
+      "parent": "root",
+      "y": 16.3333333
+    }
+  ],
+  "slots": [
+    {
+      "name": "cape",
+      "bone": "body",
+      "attachment": "cape"
+    },
+    {
+      "name": "body",
+      "bone": "body",
+      "attachment": "body"
+    },
+    {
+      "name": "scarf",
+      "bone": "body",
+      "attachment": "scarf"
+    }
+  ],
+  "skins": [
+    {
+      "name": "default",
+      "attachments": {
+        "body": {
+          "body": {
+            "width": 32,
+            "height": 32
+          }
+        }
+      }
+    },
+    {
+      "name": "shared",
+      "attachments": {
+        "scarf": {
+          "scarf": {
+            "type": "mesh",
+            "uvs": [
+              0,
+              0,
+              1,
+              0,
+              1,
+              1,
+              0,
+              1
+            ],
+            "triangles": [
+              0,
+              1,
+              2,
+              2,
+              3,
+              0
+            ],
+            "vertices": [
+              -8,
+              8,
+              8,
+              8,
+              8,
+              24,
+              -8,
+              24
+            ],
+            "hull": 4
+          }
+        }
+      }
+    },
+    {
+      "name": "blue",
+      "attachments": {
+        "cape": {
+          "cape": {
+            "path": "cape-blue",
+            "x": -8,
+            "width": 16,
+            "height": 32
+          }
+        },
+        "scarf": {
+          "scarf": {
+            "type": "linkedmesh",
+            "skin": "shared",
+            "parent": "scarf",
+            "width": 16,
+            "height": 16
+          }
+        }
+      }
+    },
+    {
+      "name": "red",
+      "attachments": {
+        "cape": {
+          "cape": {
+            "path": "cape-red",
+            "x": -8,
+            "width": 16,
+            "height": 32,
+            "color": "ff8080ff"
+          }
+        }
+      }
+    }
+  ],
+  "animations": {
+    "idle": {
+      "bones": {
+        "body": {
+          "rotate": [
+            {
+              "value": 0
+            },
+            {
+              "time": 0.5,
+              "value": 4.4444444,
+              "curve": [
+                0.2,
+                0,
+                0.3,
+                4.4444444
+              ]
+            },
+            {
+              "time": 1
+            }
+          ]
+        }
+      },
+      "attachments": {
+        "shared": {
+          "scarf": {
+            "scarf": {
+              "deform": [
+                {},
+                {
+                  "time": 0.5,
+                  "vertices": [
+                    1,
+                    1
+                  ]
+                },
+                {
+                  "time": 1
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "attack": {
+      "bones": {
+        "body": {
+          "translate": [
+            {
+              "x": 1.23456,
+              "curve": "stepped"
+            },
+            {
+              "time": 0.5,
+              "x": 2
+            }
+          ]
+        }
+      }
+    },
+    "debug/pose": {
+      "bones": {
+        "body": {
+          "rotate": [
+            {
+              "value": 0
+            },
+            {
+              "time": 0.5,
+              "value": 90,
+              "curve": [
+                0.2,
+                0,
+                0.3,
+                90
+              ]
+            },
+            {
+              "time": 1
+            }
+          ]
+        }
+      }
+    }
+  }
+}

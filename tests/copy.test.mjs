@@ -8,7 +8,7 @@ describe('copy.action', () => {
     const out = await tempDir();
     const result = await copy.process({ source: 'tests/assets/data', destination: out });
     assert.equal(result.ok, true, result.errors.join('\n'));
-    assert.deepEqual(await listFiles(out), ['config.xml', 'levels/level_01.json', 'levels/level_02.json']);
+    assert.deepEqual(await listFiles(out), ['config.xml', 'levels/level_01.json', 'levels/level_02.json', 'world.json']);
   });
 
   it('leaves other files in its destination alone, and takes absolute paths', async () => {
@@ -25,7 +25,8 @@ describe('copy.action', () => {
     assert.deepEqual(result.outputs.map((file) => file.path).sort(), [
       'config.xml',
       'levels/level_01.json',
-      'levels/level_02.json'
+      'levels/level_02.json',
+      'world.json'
     ]);
     assert.ok(result.outputs[0].data.length > 0);
     assert.deepEqual(result.warnings, []);

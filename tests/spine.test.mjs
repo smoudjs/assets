@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import sharp from 'sharp';
 import { run, scratchAssets } from './helpers.mjs';
 
-const spineOnly = (options = {}) => ({ actions: [{ action: 'spine', source: 'spine', ...options }] });
+const spineOnly = (options = {}) => ({ actions: [{ action: 'spine', source: 'spine/hero', ...options }] });
 const animationsOf = async (read) => Object.keys(JSON.parse(await read('spine/hero/hero.json')).animations);
 
 describe('spine: pages and atlas', () => {
@@ -41,6 +41,63 @@ describe('spine: pages and atlas', () => {
 
     const roomy = await run(spineOnly({ maxWidth: 2048, maxHeight: 2048 }));
     assert.match((await roomy.read('spine/hero/hero.atlas')).toString(), /^ {2}bounds: 0, 0, 32, 32$/m);
+  });
+
+  it('scale follows a Spine 4 atlas, whose region keys are not indented, page by page', async () => {
+    const assets = await scratchAssets();
+    const blank = (size) =>
+      sharp({ create: { width: size, height: size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.5 } } })
+        .png()
+        .toBuffer();
+    await assets.write('spine/hero/second.png', await blank(32));
+    await assets.write(
+      'spine/hero/hero.atlas',
+      'hero.png\nsize:64,64\nfilter:Linear,Linear\npma:true\nscale:0.5\n' +
+        'head\nbounds:0,0,30,20\noffsets:1,1,32,22\nrotate:90\n' +
+        'body\nbounds:33,1,29,29\nsplit:3,3,3,3\n' +
+        '\nsecond.png\nsize:32,32\nfilter:Linear,Linear\narm\nbounds:0,0,15,15\n'
+    );
+    const { result, read } = await run({ source: assets.dir, ...spineOnly({ scale: 0.5 }) });
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    assert.equal(
+      (await read('spine/hero/hero.atlas')).toString(),
+      'hero.png\nsize:32,32\nfilter:Linear,Linear\npma:true\nscale:0.5\n' +
+        // rotated: 30 by 20 as unrotated, 20 by 30 on the page
+        'head\nbounds:0,0,15,10\noffsets:1,1,16,11\nrotate:90\n' +
+        // rounded at its edges: 16.5 to 31 makes 17 to 31, 14 wide, where rounding the width alone gives 15
+        'body\nbounds:17,1,14,14\nsplit:2,2,2,2\n' +
+        '\nsecond.png\nsize:16,16\nfilter:Linear,Linear\narm\nbounds:0,0,8,8\n'
+    );
+    assert.equal((await sharp(await read('spine/hero/second.png')).metadata()).width, 16);
+  });
+
+  it('scale follows a Spine 3 atlas: xy and size round at their edges, rotate: true turns them', async () => {
+    const assets = await scratchAssets();
+    await assets.write(
+      'spine/hero/hero.atlas',
+      '\nhero.png\nsize: 64,64\nformat: RGBA8888\nfilter: Linear,Linear\nrepeat: none\n' +
+        'head\n  rotate: true\n  xy: 33, 1\n  size: 20, 29\n  orig: 22, 30\n  offset: 1, 1\n  index: -1\n'
+    );
+    const { result, read } = await run({ source: assets.dir, ...spineOnly({ scale: 0.5 }) });
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    assert.equal(
+      (await read('spine/hero/hero.atlas')).toString(),
+      '\nhero.png\nsize: 32,32\nformat: RGBA8888\nfilter: Linear,Linear\nrepeat: none\n' +
+        'head\n  rotate: true\n  xy: 17, 1\n  size: 10, 14\n  orig: 11, 15\n  offset: 1, 1\n  index: -1\n'
+    );
+  });
+
+  it('webp takes the image action encoder settings for webp pages', async () => {
+    // alpha with detail, which a lower alpha quality can save on; the fixture page has only two flat alphas
+    const assets = await scratchAssets();
+    const pixels = Buffer.alloc(64 * 64 * 4);
+    for (let i = 0; i < 64 * 64; i++) pixels.set([200, 120, 40, Math.round(127 + 127 * Math.sin(i * 0.37) * Math.cos(i * 0.11))], i * 4);
+    await assets.write('spine/hero/hero.png', await sharp(pixels, { raw: { width: 64, height: 64, channels: 4 } }).png().toBuffer());
+    const pageSize = async (options) => {
+      const { read } = await run({ source: assets.dir, ...spineOnly({ format: 'webp', ...options }) });
+      return (await read('spine/hero/hero.webp')).length;
+    };
+    assert.ok((await pageSize({ webp: { alphaQuality: 10 } })) < (await pageSize({})), 'a lower alpha quality makes a smaller page');
   });
 
   it('jpeg is refused for a page with transparency, with a warning', async () => {
@@ -116,12 +173,12 @@ describe('spine: skeleton', () => {
     assert.match(typo.result.warnings.join('\n'), /"jump" matches nothing/);
   });
 
-  it('a .skel alone is kept as it is, with a warning when animations are set', async () => {
+  it('a .skel alone of a version other than 4.2 is kept as it is, with a warning when animations are set', async () => {
     const assets = await scratchAssets();
     await assets.remove('spine/hero/hero.json');
     const { result, read } = await run({ source: assets.dir, ...spineOnly({ animations: { exclude: ['idle'] } }) });
     assert.equal(result.ok, true, result.errors.join('\n'));
-    assert.match(result.warnings.join('\n'), /binary \.skel is kept as it is/);
+    assert.match(result.warnings.join('\n'), /only 4\.2; animations and skins work on a \.json only; the \.skel is kept as it is/);
     assert.deepEqual([...(await read('spine/hero/hero.skel'))], [0x53, 0x4b, 0x45, 0x4c, 0x00, 0x04, 0x01, 0x00]);
   });
 });

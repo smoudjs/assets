@@ -6,7 +6,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseVirtualFolder } from './actions/index.js';
-import { loadConfig, prepareConfig, type PreparedAction, type PreparedConfig } from './config.js';
+import { loadConfig, prepareConfig, readsDisk, type PreparedAction, type PreparedConfig } from './config.js';
 import { destinationPath, listSourceFiles, selectFiles } from './files.js';
 import type {
   ActionResult,
@@ -157,37 +157,43 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
   return finishBuild(result, started, options);
 }
 
-/** The files an action gets: from the disk, or from a virtual folder. Null skips the action. */
+/** The files an action gets: from the disk, from virtual folders, or both. Null skips the action. */
 async function selectActionFiles(action: PreparedAction, state: BuildState): Promise<AssetFile[] | null> {
   const { source } = action;
   const where = `action ${action.index} (${action.label})`;
-  let pool: AssetFile[] | undefined;
-  if (source.virtual !== undefined) {
-    state.readVirtual.add(source.virtual);
-    pool = state.virtual[source.virtual];
-    if (!pool) {
-      state.result.errors.push(`${where}: virtual folder "#${source.virtual}" is read before anything produced it`);
-      return null;
-    }
+  const parts: { include: string[]; pool?: AssetFile[] }[] = [];
+  for (const { name, include } of source.virtual) {
+    state.readVirtual.add(name);
+    const pool = state.virtual[name];
+    if (!pool) state.result.errors.push(`${where}: virtual folder "#${name}" is read before anything produced it`);
+    else parts.push({ include, pool });
   }
+  if (parts.length < source.virtual.length) return null;
+  if (readsDisk(source)) parts.unshift({ include: source.include });
+
   const skip = (origin: string) =>
     (source.rest && state.taken.has(origin)) ||
     (action.fromPreset && state.takenByOwnActions.has(origin)) ||
     state.companions.has(origin);
-  const selection = await selectFiles(
-    { include: source.include, exclude: source.exclude, when: source.when },
-    {
-      root: state.config.source,
-      pool,
-      exclude: pool ? [] : state.ignore,
-      accepts: action.action.accepts,
-      probe: action.action.probe,
-      findCompanions: action.action.findCompanions,
-      skip
-    }
-  );
-  for (const warning of selection.warnings) state.result.warnings.push(`${where}: ${warning}`);
-  return selection.files;
+  // a file two parts select is taken once
+  const files = new Map<string, AssetFile>();
+  for (const { include, pool } of parts) {
+    const selection = await selectFiles(
+      { include, exclude: source.exclude, when: source.when },
+      {
+        root: state.config.source,
+        pool,
+        exclude: pool ? [] : state.ignore,
+        accepts: action.action.accepts,
+        probe: action.action.probe,
+        findCompanions: action.action.findCompanions,
+        skip
+      }
+    );
+    for (const warning of selection.warnings) state.result.warnings.push(`${where}: ${warning}`);
+    for (const file of selection.files) if (!files.has(file.origin as string)) files.set(file.origin as string, file);
+  }
+  return [...files.values()];
 }
 
 async function runAction(action: PreparedAction, files: AssetFile[], state: BuildState): Promise<void> {
@@ -217,9 +223,15 @@ async function runAction(action: PreparedAction, files: AssetFile[], state: Buil
     return;
   }
   result.label = action.label;
-  // build hands every action its files in memory; only a virtual source is not source bytes
-  if (action.source.virtual !== undefined) result.memorySource = action.source.virtual;
-  else delete result.memorySource;
+  // build hands every action its files in memory; only files from virtual folders are not source bytes
+  delete result.memorySource;
+  delete result.memoryInputs;
+  if (!readsDisk(action.source)) {
+    result.memorySource = [...new Set(action.source.virtual.map(({ name }) => name))].join(', ');
+  } else {
+    const fromMemory = files.filter((file) => file.origin?.startsWith('#'));
+    if (fromMemory.length) result.memoryInputs = { files: fromMemory.length, bytes: fromMemory.reduce(sizeIn, 0) };
+  }
   state.result.warnings.push(...result.warnings.map((warning) => `${where}: ${warning}`));
   state.result.errors.push(...result.errors.map((error) => `${where}: ${error}`));
   state.result.actions.push(result);
@@ -254,9 +266,14 @@ async function runAction(action: PreparedAction, files: AssetFile[], state: Buil
   if (!virtual) result.destination = path.join(state.config.destination, folder ?? '');
 }
 
+// a file and its companions, the way `finishAction` counts bytes in
+function sizeIn(total: number, file: AssetFile): number {
+  return total + file.meta.size + (file.companions ?? []).reduce((sum, companion) => sum + companion.data.length, 0);
+}
+
 // an action without `source` takes every file its type accepts
 function isCatchAll(action: PreparedAction): boolean {
-  return action.source.include.length === 0 && !action.source.rest && action.source.virtual === undefined;
+  return action.source.include.length === 0 && !action.source.rest && action.source.virtual.length === 0;
 }
 
 // A file taken by an action without `source` and again by another action usually means a catch-all is not last.

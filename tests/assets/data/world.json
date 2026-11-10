@@ -1,0 +1,285 @@
+{
+  "name": "meadow",
+  "width": 32,
+  "height": 32,
+  "tiles": [
+    {
+      "x": 0,
+      "y": 0,
+      "kind": "grass",
+      "walkable": false
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "kind": "stone",
+      "walkable": true
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "kind": "sand",
+      "walkable": true
+    },
+    {
+      "x": 3,
+      "y": 0,
+      "kind": "water",
+      "walkable": true
+    },
+    {
+      "x": 4,
+      "y": 0,
+      "kind": "grass",
+      "walkable": true
+    },
+    {
+      "x": 5,
+      "y": 0,
+      "kind": "stone",
+      "walkable": false
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "kind": "sand",
+      "walkable": true
+    },
+    {
+      "x": 1,
+      "y": 1,
+      "kind": "water",
+      "walkable": true
+    },
+    {
+      "x": 2,
+      "y": 1,
+      "kind": "grass",
+      "walkable": true
+    },
+    {
+      "x": 3,
+      "y": 1,
+      "kind": "stone",
+      "walkable": true
+    },
+    {
+      "x": 4,
+      "y": 1,
+      "kind": "sand",
+      "walkable": false
+    },
+    {
+      "x": 5,
+      "y": 1,
+      "kind": "water",
+      "walkable": true
+    },
+    {
+      "x": 0,
+      "y": 2,
+      "kind": "grass",
+      "walkable": true
+    },
+    {
+      "x": 1,
+      "y": 2,
+      "kind": "stone",
+      "walkable": true
+    },
+    {
+      "x": 2,
+      "y": 2,
+      "kind": "sand",
+      "walkable": true
+    },
+    {
+      "x": 3,
+      "y": 2,
+      "kind": "water",
+      "walkable": false
+    },
+    {
+      "x": 4,
+      "y": 2,
+      "kind": "grass",
+      "walkable": true
+    },
+    {
+      "x": 5,
+      "y": 2,
+      "kind": "stone",
+      "walkable": true
+    },
+    {
+      "x": 0,
+      "y": 3,
+      "kind": "sand",
+      "walkable": true
+    },
+    {
+      "x": 1,
+      "y": 3,
+      "kind": "water",
+      "walkable": true
+    },
+    {
+      "x": 2,
+      "y": 3,
+      "kind": "grass",
+      "walkable": false
+    },
+    {
+      "x": 3,
+      "y": 3,
+      "kind": "stone",
+      "walkable": true
+    },
+    {
+      "x": 4,
+      "y": 3,
+      "kind": "sand",
+      "walkable": true
+    },
+    {
+      "x": 5,
+      "y": 3,
+      "kind": "water",
+      "walkable": true
+    },
+    {
+      "x": 0,
+      "y": 4,
+      "kind": "grass",
+      "walkable": true
+    },
+    {
+      "x": 1,
+      "y": 4,
+      "kind": "stone",
+      "walkable": false
+    },
+    {
+      "x": 2,
+      "y": 4,
+      "kind": "sand",
+      "walkable": true
+    },
+    {
+      "x": 3,
+      "y": 4,
+      "kind": "water",
+      "walkable": true
+    },
+    {
+      "x": 4,
+      "y": 4,
+      "kind": "grass",
+      "walkable": true
+    },
+    {
+      "x": 5,
+      "y": 4,
+      "kind": "stone",
+      "walkable": true
+    }
+  ],
+  "props": [
+    {
+      "type": "tree",
+      "position": [
+        0,
+        0
+      ],
+      "scale": 1
+    },
+    {
+      "type": "rock",
+      "position": [
+        37,
+        53
+      ],
+      "scale": 1.25
+    },
+    {
+      "type": "bush",
+      "position": [
+        74,
+        106
+      ],
+      "scale": 1.5
+    },
+    {
+      "type": "tree",
+      "position": [
+        111,
+        159
+      ],
+      "scale": 1.75
+    },
+    {
+      "type": "rock",
+      "position": [
+        148,
+        212
+      ],
+      "scale": 1
+    },
+    {
+      "type": "bush",
+      "position": [
+        185,
+        265
+      ],
+      "scale": 1.25
+    },
+    {
+      "type": "tree",
+      "position": [
+        222,
+        318
+      ],
+      "scale": 1.5
+    },
+    {
+      "type": "rock",
+      "position": [
+        259,
+        51
+      ],
+      "scale": 1.75
+    },
+    {
+      "type": "bush",
+      "position": [
+        296,
+        104
+      ],
+      "scale": 1
+    },
+    {
+      "type": "tree",
+      "position": [
+        13,
+        157
+      ],
+      "scale": 1.25
+    },
+    {
+      "type": "rock",
+      "position": [
+        50,
+        210
+      ],
+      "scale": 1.5
+    },
+    {
+      "type": "bush",
+      "position": [
+        87,
+        263
+      ],
+      "scale": 1.75
+    }
+  ]
+}

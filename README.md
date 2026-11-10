@@ -41,6 +41,7 @@ Making a playable ad? Add `--preset playable` or `--preset playable-max` to conv
   - [copy](#copy)
 - [JavaScript API](#javascript-api)
   - [Your own actions](#your-own-actions)
+- [Game runtime](#game-runtime)
 
 ## Features
 
@@ -51,7 +52,7 @@ Making a playable ad? Add `--preset playable` or `--preset playable-max` to conv
 - 🧩 **Texture atlases**: MaxRects packing, trimming, extrusion, TexturePacker-compatible JSON.
 - 🔊 **Audio**: mp3, ogg, opus or m4a, mono downmix, bitrate by quality, never above the source. Audio sprites for Howler, Phaser and PixiJS Sound.
 - 🧊 **3D models**: [glTF Transform](https://gltf-transform.dev) and meshoptimizer: dedup, weld, prune, simplify, quantize, texture extraction, meshopt compression.
-- 🦴 **Spine**: pages compressed, converted and scaled with the `.atlas` rewritten, skeleton numbers rounded, animations filtered.
+- 🦴 **Spine**: pages compressed, converted and scaled with the `.atlas` rewritten, skeleton numbers rounded, animations and skins filtered, `.json` and `.skel` converted for Spine 4.2.
 - ✒️ **Fonts**: [HarfBuzz](https://harfbuzz.github.io) subsetting to the characters you use, WOFF2 and WOFF. Bitmap fonts drawn from any font, with outline and shadow.
 - 🎬 **Video**: mp4 or webm, or animated webp and gif with transparency.
 - 📄 **Data files**: JSON and XML minified.
@@ -261,7 +262,15 @@ A destination starting with `#` keeps the results in memory instead of writing t
 
 The svg icons are rasterized at 144 dpi, then packed into `icons.png` and `icons.json`, named after the virtual folder. A virtual folder must be produced above the action that reads it. A virtual folder nothing reads is a warning.
 
-In the report, an action that writes to a virtual folder shows its size change dimmed, followed by `→ #icons`. Those bytes never reach disk, so the total leaves them out.
+A source can list several virtual folders, mixed with patterns on disk. A file two entries select is taken once:
+
+```json
+{ "action": "atlas", "source": ["#icons", "#buttons/small/**", "ui/logo.png"] }
+```
+
+`#rest` is the exception: it stands alone, or with its own sub-pattern like `"#rest/ui/**"`.
+
+In the report, an action that writes to a virtual folder shows its size change dimmed, followed by `→ #icons`. Those bytes never reach disk, so the total leaves them out, also when an action reads them together with files from disk.
 
 ### Defaults
 
@@ -675,15 +684,18 @@ Optimizes Spine exports. Takes `.atlas` files. The pages an atlas names and the 
 | ------------ | ------------------------------------------------------------------------------------------ | ------------- |
 | `format`     | Page format: `png`, `jpeg`, `webp`, `avif`. The `.atlas` is rewritten to match.            | as the source |
 | `quality`    | 1 to 100. For png pages, setting it switches to palette compression.                       | not set       |
+| `webp`       | WebP encoder for webp pages, as in [image](#image): `{ "alphaQuality": 50 }`.             | as in image   |
 | `scale`      | Shrink pages, 0 to 1. Every coordinate in the `.atlas` scales with them.                   | `1`           |
 | `maxWidth`   | Shrink pages wider than this. Their coordinates in the `.atlas` follow.                    | none          |
 | `maxHeight`  | Shrink pages taller than this. Their coordinates in the `.atlas` follow.                   | none          |
 | `precision`  | Decimals kept for numbers in the skeleton `.json`.                                         | `3`           |
 | `animations` | `false`, `{ "include": [...] }` or `{ "exclude": [...] }`: names or patterns, like `run*`. | all kept      |
+| `skins`      | `[...]`, `{ "include": [...] }` or `{ "exclude": [...] }`. The `default` skin stays.       | all kept      |
+| `skeleton`   | Skeleton format: `json` or `skel`.                                                         | as the source |
 
 Good to know:
 
-- A binary `.skel` is kept as it is. `animations` and `precision` work on a `.json` skeleton.
+- `.json` and `.skel` convert for Spine 4.2 only. Other versions keep their format, and `animations` and `skins` then work on a `.json` only.
 - jpeg cannot hold transparency, so a page with it keeps its format, with a warning.
 - Put `spine` before your image and json actions.
 
@@ -754,7 +766,11 @@ Transparency stays in webm, webp and gif. mp4 cannot hold it.
 
 ### json
 
-Minifies JSON files. An invalid file is an error. No options.
+Minifies JSON files. An invalid file is an error.
+
+| Option | What it does                                                                                     | Default |
+| ------ | ------------------------------------------------------------------------------------------------ | ------- |
+| `pack` | Smaller raw size, for single-file playables. Read it in the game with [`unpackJson`](#game-runtime). | `false` |
 
 ### xml
 
@@ -870,10 +886,12 @@ const tight = xml.minifyXml(xmlBuffer, { comments: false });
 | `gltf.readGltfMeta(data)`                      | `{ format, triangles, vertices, textures, animations }`                                                                                         |
 | `meshopt.compressGltf(model, options)`         | As `gltf.optimizeGltf`, with the model compressed.                                                                                              |
 | `spine.optimizeSpine(input, options)`          | `{ atlas, files, warnings }`. `files` are the pages and skeleton, by the names the `.atlas` refers to.                                          |
+| `spine.toSkel(json)` / `spine.toJson(skel)`    | A Spine 4.2 skeleton converted, as a buffer. Throws on another version.                                                                         |
 | `font.optimizeFont(data, options)`             | `{ data, format, keptOriginal }`                                                                                                                |
 | `bitmapfont.makeBitmapFont(input, options)`    | `{ fnt, pages, warnings }`. `input` is `{ data, path }`, plus `files`, the pages by name, for a `.fnt`.                                         |
 | `video.encodeVideo(data, options)`             | `{ data, format, width, height, duration, fps, audio, alpha, keptOriginal, warnings }`                                                          |
 | `json.minifyJson(data)`                        | A buffer. Throws on invalid JSON.                                                                                                               |
+| `json.packJson(data)`                          | A buffer, packed as the `pack` option does. Throws on invalid JSON.                                                                             |
 | `xml.minifyXml(data, options)`                 | A buffer.                                                                                                                                       |
 
 ### Find and write files
@@ -1037,6 +1055,21 @@ Spread the input file into each output, `{ ...file, data }`, so the report links
 **Writing `process` yourself.** An action that defines `process` instead of `transform` is used exactly as written, for example when it needs its own file selection. Use `selectFiles` to find files, and `finishAction` to write the outputs and build a result the report and `build` understand.
 
 Each option has a `kind` (`boolean`, `number`, `string`, `enum`, `object`, `list` or `oneOf`), a `description` and an optional `default`. Values that don't fit the kind are errors.
+
+## Game runtime
+
+Small utilities for your game, to read what the build wrote. No dependencies, safe to bundle into a browser game.
+
+| Function           | What it does                                                                                                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unpackJson(json)` | Reads a file written with the json action's `pack` option. Takes the parsed JSON or its text; other JSON is returned as it is. [Source](https://github.com/smoudjs/assets/blob/master/src/runtime/unpack-json.ts) |
+
+```js
+import { unpackJson } from '@smoud/assets/runtime';
+import packed from './assets/level.json';
+
+const level = unpackJson(packed);
+```
 
 ## Issues
 

@@ -22,7 +22,16 @@ export default defineConfig([
     entry: { index: 'src/index.ts' },
     format: ['esm', 'cjs'],
     dts: true,
-    clean: true
+    // the runtime build below writes next to it at the same time
+    clean: ['!runtime.*']
+  },
+  {
+    // @smoud/assets/runtime, code for the game itself: built apart, so no Node.js shim or shared chunk reaches it
+    entry: { runtime: 'src/runtime/index.ts' },
+    format: ['esm', 'cjs'],
+    platform: 'neutral',
+    target: 'es2019',
+    dts: true
   },
   {
     ...shared,
