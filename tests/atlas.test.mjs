@@ -121,6 +121,17 @@ describe('atlas', () => {
     assert.ok(quantized.length < plain.length, `${quantized.length} >= ${plain.length}`);
   });
 
+  it('pages take the encoder settings of their format, as in the image action', async () => {
+    const pageSize = async (options, file) =>
+      (await (await run({ actions: [{ action: 'atlas', source: 'sprites', ...options }] })).read(file)).length;
+    const webp = await pageSize({ format: 'webp' }, 'sprites.webp');
+    assert.ok((await pageSize({ format: 'webp', webp: { quality: 10 } }, 'sprites.webp')) < webp, 'webp.quality reaches the encoder');
+    // avif has its own quality, as in the image action: the top-level quality does not change it
+    const avif = await pageSize({ format: 'avif' }, 'sprites.avif');
+    assert.equal(await pageSize({ format: 'avif', quality: 90 }, 'sprites.avif'), avif);
+    assert.notEqual(await pageSize({ format: 'avif', avif: { quality: 90 } }, 'sprites.avif'), avif);
+  });
+
   it('a filename template with a hash names the page and its JSON alike', async () => {
     const { outputs, read } = await run({
       actions: [{ action: 'atlas', source: 'tiles', destination: { folder: 'atlases', filename: '[name].[hash:6][ext]' } }]

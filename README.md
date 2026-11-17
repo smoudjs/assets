@@ -52,7 +52,7 @@ Making a playable ad? Add `--preset playable` or `--preset playable-max` to conv
 - 🧩 **Texture atlases**: MaxRects packing, trimming, extrusion, TexturePacker-compatible JSON.
 - 🔊 **Audio**: mp3, ogg, opus or m4a, mono downmix, bitrate by quality, never above the source. Audio sprites for Howler, Phaser and PixiJS Sound.
 - 🧊 **3D models**: [glTF Transform](https://gltf-transform.dev) and meshoptimizer: dedup, weld, prune, simplify, quantize, texture extraction, meshopt compression.
-- 🦴 **Spine**: pages compressed, converted and scaled with the `.atlas` rewritten, skeleton numbers rounded, animations and skins filtered, `.json` and `.skel` converted for Spine 4.2.
+- 🦴 **Spine**: pages compressed, converted and scaled with the `.atlas` rewritten, skeleton numbers rounded, animations and skins filtered, `.json` and `.skel` converted for Spine 4.1 and 4.2.
 - ✒️ **Fonts**: [HarfBuzz](https://harfbuzz.github.io) subsetting to the characters you use, WOFF2 and WOFF. Bitmap fonts drawn from any font, with outline and shadow.
 - 🎬 **Video**: mp4 or webm, or animated webp and gif with transparency.
 - 📄 **Data files**: JSON and XML minified.
@@ -401,7 +401,9 @@ npx smoud-assets build --destination ../dist
 
 Each action has the same options in `assets.json` and in code. In code, each action also has a raw function that works on bytes, see [Raw functions](#raw-functions).
 
-### image
+---
+
+### `image`
 
 Resizes, trims, converts and compresses images. Takes `png`, `jpg`, `jpeg`, `webp`, `gif`, `avif`, `tif`, `tiff`, `svg`. Steps always run in this order: size limit, trim, resize, flatten, encode.
 
@@ -449,7 +451,9 @@ Good to know:
 - svg sources need a raster `format`, otherwise they are skipped with a warning.
 - An animation converted to png, jpeg or avif keeps its first frame.
 
-### atlas
+---
+
+### `atlas`
 
 Packs images into one or more pages, with a data file per page. By default it is TexturePacker JSON, which PixiJS, Phaser, Babylon.js, PlayCanvas and most other engines load directly. Takes `png`, `jpg`, `jpeg`, `webp`, `gif` (first frame), `avif`, `tif`, `tiff`.
 
@@ -469,6 +473,7 @@ Packs images into one or more pages, with a data file per page. By default it is
 | `powerOfTwo`     | Round page sizes up to a power of two.                                | `false`     |
 | `format`         | Page format: `png`, `jpeg`, `webp`, `avif`.                           | `png`       |
 | `quality`        | 1 to 100. For png pages, setting it switches to palette compression.  | not set     |
+| `png`, `jpeg`, `webp`, `avif` | Encoder settings of that page format, as in [image](#image): `"webp": { "alphaQuality": 50 }`. | as in image |
 | `data`           | Layout of the data file, see the table below.                         | `json-hash` |
 
 `data` layouts:
@@ -508,7 +513,9 @@ Good to know:
 - The same input always gives identical bytes. Frames are never rotated.
 - On a lossless png page, a frame cut back out equals the trimmed sprite pixel for pixel.
 
-### audio
+---
+
+### `audio`
 
 Converts, downmixes, resamples and compresses sounds. Takes `mp3`, `ogg`, `oga`, `opus`, `m4a`, `aac`, `wav`, `flac`, `webm`.
 
@@ -538,7 +545,9 @@ Good to know:
 - `"when": { "duration": ">10" }` separates music from sound effects.
 - Runs on ffmpeg through [@smoud/ffmpeg](https://www.npmjs.com/package/@smoud/ffmpeg). Set `FFMPEG_PATH` to use your own.
 
-### audiosprite
+---
+
+### `audiosprite`
 
 Joins many sounds into one file with silence between them, plus a JSON that tells the player where each sound is. Takes the same files as `audio`.
 
@@ -578,7 +587,9 @@ Good to know:
 - Channels and sample rate come from the sounds, never higher.
 - Looping is set in the game, not in the JSON.
 
-### gltf
+---
+
+### `gltf`
 
 Optimizes glTF models, `.glb` and `.gltf`. Everything it writes loads in any engine without a decoder.
 
@@ -611,6 +622,7 @@ Optimizes glTF models, `.glb` and `.gltf`. Everything it writes loads in any eng
 `textures`:
 
 - `format`, `quality`, `maxWidth`, `maxHeight`: re-encode through the image action. Without them, textures stay as they are.
+- `jpeg`, `webp`, `avif`: encoder settings of re-encoded textures, as in [image](#image). png textures stay lossless, since a palette would band normal maps.
 - `extract: true`: textures are written next to the model, like `crate_wood_baseColor.png` (model, material, slot), and removed from it. UVs stay, so the game can put them back.
 
 `resample`:
@@ -647,7 +659,9 @@ Good to know:
 - Extracted textures fit an atlas only when they do not repeat; the game maps the UVs onto the frame.
 - Reads meshopt-compressed models too, and always writes them uncompressed. For compression, see [meshopt](#meshopt).
 
-### meshopt
+---
+
+### `meshopt`
 
 Compresses glTF models, `.glb` and `.gltf`, with `EXT_meshopt_compression`. The game needs meshoptimizer's decoder to load them.
 
@@ -672,7 +686,9 @@ loader.setMeshoptDecoder(MeshoptDecoder);
 
 Works on any glTF model. Run `gltf` before it to also clean up, simplify or re-encode textures, as in the example above.
 
-### spine
+---
+
+### `spine`
 
 Optimizes Spine exports. Takes `.atlas` files. The pages an atlas names and the skeleton with its name, `hero.json` or `hero.skel`, come with it, and no later action takes them.
 
@@ -684,7 +700,7 @@ Optimizes Spine exports. Takes `.atlas` files. The pages an atlas names and the 
 | ------------ | ------------------------------------------------------------------------------------------ | ------------- |
 | `format`     | Page format: `png`, `jpeg`, `webp`, `avif`. The `.atlas` is rewritten to match.            | as the source |
 | `quality`    | 1 to 100. For png pages, setting it switches to palette compression.                       | not set       |
-| `webp`       | WebP encoder for webp pages, as in [image](#image): `{ "alphaQuality": 50 }`.             | as in image   |
+| `png`, `jpeg`, `webp`, `avif` | Encoder settings of that page format, as in [image](#image): `"webp": { "alphaQuality": 50 }`. | as in image |
 | `scale`      | Shrink pages, 0 to 1. Every coordinate in the `.atlas` scales with them.                   | `1`           |
 | `maxWidth`   | Shrink pages wider than this. Their coordinates in the `.atlas` follow.                    | none          |
 | `maxHeight`  | Shrink pages taller than this. Their coordinates in the `.atlas` follow.                   | none          |
@@ -695,11 +711,13 @@ Optimizes Spine exports. Takes `.atlas` files. The pages an atlas names and the 
 
 Good to know:
 
-- `.json` and `.skel` convert for Spine 4.2 only. Other versions keep their format, and `animations` and `skins` then work on a `.json` only.
+- `.json` and `.skel` convert for Spine 4.1 and 4.2. Other versions keep their format, and `animations` and `skins` then work on a `.json` only.
 - jpeg cannot hold transparency, so a page with it keeps its format, with a warning.
 - Put `spine` before your image and json actions.
 
-### font
+---
+
+### `font`
 
 Keeps only the characters you use, and converts to WOFF2. Takes `ttf`, `otf`, `woff`, `woff2`.
 
@@ -718,7 +736,9 @@ Keeps only the characters you use, and converts to WOFF2. Takes `ttf`, `otf`, `w
 
 Arial, 1 MB, becomes 37 KB as WOFF2 with Latin letters and digits, or 9 KB without hinting.
 
-### bitmapfont
+---
+
+### `bitmapfont`
 
 Draws a font into a BMFont `.fnt` and its page, for `BitmapText` in Phaser and PixiJS. Takes `ttf`, `otf`, `woff`, `woff2`, and text or XML `.fnt` files, whose pages come with them.
 
@@ -735,6 +755,7 @@ Draws a font into a BMFont `.fnt` and its page, for `BitmapText` in Phaser and P
 | `shadow`                                         | `{ "x": 2, "y": 2, "color": "#000000" }`, no blur. | none                      |
 | `format`                                         | Page format: `png`, `webp`, `avif`.                | `png`, or as the `.fnt`   |
 | `quality`                                        | 1 to 100. For png pages, switches to a palette.    | not set                   |
+| `png`, `webp`, `avif`                            | Encoder settings of that page format, as in [image](#image). | as in image     |
 | `data`                                           | `xml`, which Phaser needs, or `text`.              | `xml`, or as the `.fnt`   |
 | `padding`, `maxWidth`, `maxHeight`, `powerOfTwo` | As in [atlas](#atlas), when glyphs are packed.     | as in atlas               |
 
@@ -743,7 +764,9 @@ Good to know:
 - A `.fnt` keeps its glyphs where they are: pages are only converted. They are repacked when `characters` drops some.
 - `size`, `color`, `outline` and `shadow` apply when drawing from a font. A binary `.fnt` is refused.
 
-### video
+---
+
+### `video`
 
 Shrinks and compresses videos. Takes `mp4`, `webm`, `mov`, `m4v`, `mkv`, `avi`, `ogv`.
 
@@ -764,7 +787,9 @@ Shrinks and compresses videos. Takes `mp4`, `webm`, `mov`, `m4v`, `mkv`, `avi`, 
 
 Transparency stays in webm, webp and gif. mp4 cannot hold it.
 
-### json
+---
+
+### `json`
 
 Minifies JSON files. An invalid file is an error.
 
@@ -772,7 +797,9 @@ Minifies JSON files. An invalid file is an error.
 | ------ | ------------------------------------------------------------------------------------------------ | ------- |
 | `pack` | Smaller raw size, for single-file playables. Read it in the game with [`unpackJson`](#game-runtime). | `false` |
 
-### xml
+---
+
+### `xml`
 
 Minifies XML files: whitespace between tags is removed. Text and CDATA sections stay exactly as written.
 
@@ -780,7 +807,9 @@ Minifies XML files: whitespace between tags is removed. Text and CDATA sections 
 | ---------- | -------------- | ------- |
 | `comments` | Keep comments. | `false` |
 
-### copy
+---
+
+### `copy`
 
 Copies files unchanged. Takes every file. No options.
 
@@ -886,7 +915,7 @@ const tight = xml.minifyXml(xmlBuffer, { comments: false });
 | `gltf.readGltfMeta(data)`                      | `{ format, triangles, vertices, textures, animations }`                                                                                         |
 | `meshopt.compressGltf(model, options)`         | As `gltf.optimizeGltf`, with the model compressed.                                                                                              |
 | `spine.optimizeSpine(input, options)`          | `{ atlas, files, warnings }`. `files` are the pages and skeleton, by the names the `.atlas` refers to.                                          |
-| `spine.toSkel(json)` / `spine.toJson(skel)`    | A Spine 4.2 skeleton converted, as a buffer. Throws on another version.                                                                         |
+| `spine.toSkel(json)` / `spine.toJson(skel)`    | A Spine 4.1 or 4.2 skeleton converted, as a buffer. Throws on another version.                                                                  |
 | `font.optimizeFont(data, options)`             | `{ data, format, keptOriginal }`                                                                                                                |
 | `bitmapfont.makeBitmapFont(input, options)`    | `{ fnt, pages, warnings }`. `input` is `{ data, path }`, plus `files`, the pages by name, for a `.fnt`.                                         |
 | `video.encodeVideo(data, options)`             | `{ data, format, width, height, duration, fps, audio, alpha, keptOriginal, warnings }`                                                          |

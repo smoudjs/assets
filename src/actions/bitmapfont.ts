@@ -9,7 +9,7 @@ import type { ActionDefinition, AssetFile, OptionTable } from '../types.js';
 import { basename, dirname, extension, join } from '../utils/fs.js';
 import { atlas, type AtlasSprite } from './atlas.js';
 import { font } from './font.js';
-import { image, type ImageOptions } from './image.js';
+import { encoderOptions, image, type ImageOptions } from './image.js';
 import { resolveOptions, transformFiles } from './index.js';
 
 type PageFormat = 'png' | 'webp' | 'avif';
@@ -31,6 +31,9 @@ export interface BitmapFontOptions extends Record<string, unknown> {
   powerOfTwo: boolean;
   format?: PageFormat;
   quality?: number;
+  png: ImageOptions['png'];
+  webp: ImageOptions['webp'];
+  avif: ImageOptions['avif'];
   data?: DataFormat;
 }
 
@@ -113,6 +116,8 @@ const options: OptionTable = {
     min: 1,
     max: 100
   },
+  // the encoder settings of each page format, as in the image action
+  ...encoderOptions(['png', 'webp', 'avif']),
   data: {
     kind: 'enum',
     values: ['xml', 'text'],
@@ -125,7 +130,7 @@ const options: OptionTable = {
 export const bitmapfont: BitmapFontAction = {
   name: 'bitmapfont',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 2,
+  version: 3,
   cache: true,
   accepts: ['ttf', 'otf', 'woff', 'woff2', 'fnt'],
   options,
@@ -272,7 +277,9 @@ export const bitmapfont: BitmapFontAction = {
         const data = input.files?.[name];
         if (!data) throw new Error(`${name} is missing; it has to sit next to the .fnt`);
         const imageOptions: Partial<ImageOptions> = {
-          png: { palette: options.quality !== undefined, colors: 256, dither: 1, effort: 7 }
+          png: { ...options.png, palette: options.png.palette && options.quality !== undefined },
+          webp: options.webp,
+          avif: options.avif
         };
         if (options.format) imageOptions.format = options.format;
         if (options.quality !== undefined) imageOptions.quality = options.quality;
@@ -326,6 +333,9 @@ export const bitmapfont: BitmapFontAction = {
       powerOfTwo: options.powerOfTwo,
       format,
       quality: options.quality,
+      png: options.png,
+      webp: options.webp,
+      avif: options.avif,
       trim: true,
       extrude: 0,
       scale: 1

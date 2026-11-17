@@ -285,6 +285,20 @@ describe('gltf: keepSmaller', () => {
     assert.equal(embedded.keptOriginal, false);
     assert.equal(embedded.format, 'gltf-embedded');
   });
+
+  it('re-encoded textures take the encoder settings of their format, as in the image action', async () => {
+    const texturesSize = async (textures) => {
+      const { outputs, read } = await run({
+        actions: [{ action: 'gltf', source: 'models/crate.glb', textures: { extract: true, format: 'webp', ...textures } }]
+      });
+      const files = (await outputs()).filter((file) => file.endsWith('.webp'));
+      assert.ok(files.length, 'textures were extracted as webp');
+      let size = 0;
+      for (const file of files) size += (await read(file)).length;
+      return size;
+    };
+    assert.ok((await texturesSize({ webp: { quality: 10 } })) < (await texturesSize({})), 'webp.quality reaches the encoder');
+  });
 });
 
 describe('gltf: when, cache and failures', () => {

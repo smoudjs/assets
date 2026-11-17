@@ -3,12 +3,12 @@
 // the .atlas rewritten to match; the skeleton is trimmed and written as .json or .skel by optimizeSkeleton.
 
 import { destinationPath } from '../files.js';
-import type { ActionDefinition, AssetFile, OptionDescriptor, OptionTable } from '../types.js';
+import type { ActionDefinition, AssetFile, OptionTable } from '../types.js';
 import { basename, dirname, extension, join } from '../utils/fs.js';
-import { jsonToSkel } from '../utils/spine/4.2/json-to-skel.js';
-import { skelToJson } from '../utils/spine/4.2/skel-to-json.js';
+import { jsonToSkel } from '../utils/spine/4.x/json-to-skel.js';
+import { skelToJson } from '../utils/spine/4.x/skel-to-json.js';
 import { type NamePatterns, optimizeSkeleton, type SkeletonFormat } from '../utils/spine/optimize-skeleton.js';
-import { image, type ImageOptions } from './image.js';
+import { encoderOptions, image, type ImageOptions } from './image.js';
 import { resolveOptions, transformFiles } from './index.js';
 
 type PageFormat = 'png' | 'jpeg' | 'webp' | 'avif';
@@ -24,7 +24,10 @@ const NUMBER = /-?\d+(\.\d+)?/g;
 export interface SpineOptions extends Record<string, unknown> {
   format?: PageFormat;
   quality?: number;
+  png: ImageOptions['png'];
+  jpeg: ImageOptions['jpeg'];
   webp: ImageOptions['webp'];
+  avif: ImageOptions['avif'];
   scale: number;
   maxWidth?: number;
   maxHeight?: number;
@@ -61,9 +64,9 @@ export interface OptimizedSpine {
 export interface SpineAction extends ActionDefinition<SpineOptions> {
   /** Optimize one Spine export. Throws when a page the .atlas names is not among `files`. */
   optimizeSpine(input: SpineInput, options?: Partial<SpineOptions>): Promise<OptimizedSpine>;
-  /** A Spine 4.2 skeleton .json as a .skel. Throws on another version. */
+  /** A Spine 4.1 or 4.2 skeleton .json as a .skel. Throws on another version. */
   toSkel(json: Buffer): Buffer;
-  /** A Spine 4.2 .skel as its skeleton .json, minified. Throws on another version. */
+  /** A Spine 4.1 or 4.2 .skel as its skeleton .json, minified. Throws on another version. */
   toJson(skel: Buffer): Buffer;
 }
 
@@ -86,8 +89,8 @@ const options: OptionTable = {
     min: 1,
     max: 100
   },
-  // the image action's own webp encoder settings, for webp pages
-  webp: { ...(image.options.webp as OptionDescriptor), description: 'WebP encoder for webp pages, as in the image action' },
+  // the encoder settings of each page format, as in the image action
+  ...encoderOptions(['png', 'jpeg', 'webp', 'avif']),
   scale: {
     kind: 'number',
     description: 'Shrink the pages; every coordinate in the .atlas scales with them',
@@ -126,7 +129,7 @@ const options: OptionTable = {
   skeleton: {
     kind: 'enum',
     values: ['json', 'skel'],
-    description: 'Skeleton format: json or a binary skel, converted for Spine 4.2 only. Omitted: as the source'
+    description: 'Skeleton format: json or a binary skel, converted for Spine 4.1 and 4.2. Omitted: as the source'
   }
 };
 
@@ -134,7 +137,7 @@ const options: OptionTable = {
 export const spine: SpineAction = {
   name: 'spine',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 4,
+  version: 6,
   cache: true,
   accepts: ['atlas'],
   options,
@@ -252,8 +255,10 @@ interface PageOut {
 async function encodePage(page: string, data: Buffer, options: SpineOptions, warnings: string[]) {
   const meta = await image.readImageMeta(data, options.format === 'jpeg' ? ['alpha'] : 'cheap');
   const imageOptions: Partial<ImageOptions> = {
-    png: { palette: options.quality !== undefined, colors: 256, dither: 1, effort: 7 },
-    webp: options.webp
+    png: { ...options.png, palette: options.png.palette && options.quality !== undefined },
+    jpeg: options.jpeg,
+    webp: options.webp,
+    avif: options.avif
   };
   if (options.format === 'jpeg' && meta.alpha) {
     warnings.push(`${page}: has transparency, which jpeg cannot hold; kept as ${extension(page)}`);

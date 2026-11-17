@@ -58,6 +58,17 @@ describe('bitmapfont', () => {
     );
   });
 
+  it('pages take the encoder settings of their format, as in the image action', async () => {
+    // glyph edges are soft alpha, which a lower alpha quality stores in less
+    const pageSize = async (options) => {
+      const { outputs, read } = await run({
+        actions: [{ action: 'bitmapfont', source: 'fonts/NotoSans-Regular.ttf', characters: 'Play Again!', size: 48, format: 'webp', ...options }]
+      });
+      return (await read((await outputs()).find((file) => file.endsWith('.webp')))).length;
+    };
+    assert.ok((await pageSize({ webp: { alphaQuality: 10 } })) < (await pageSize({})), 'webp.alphaQuality reaches the encoder');
+  });
+
   it('places glyphs on the baseline, with kerning, outline and shadow', async () => {
     const made = await bitmapfont.makeBitmapFont({ data: ttf, path: 'game.ttf' }, { size: 48 });
     const fnt = parse(made.fnt);

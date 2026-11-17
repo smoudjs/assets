@@ -1,13 +1,13 @@
 // The skeleton of a Spine export, as .json or .skel: animations and skins trimmed, numbers of a .json rounded, and
 // written in the format asked for. Trimming works on the JSON, once; each format asked for is written from it, so a
 // skeleton is converted at most once each way. A file already in the format asked for, with nothing to trim, is
-// kept byte for byte, and a .json next to a .skel is the one trimmed. Only the Spine version in ./4.2 is converted;
+// kept byte for byte, and a .json next to a .skel is the one trimmed. Only the Spine versions in ./4.x, 4.1 and 4.2, are converted;
 // another keeps the format it has, with a warning.
 
 import picomatch from 'picomatch';
-import { jsonToSkel } from './4.2/json-to-skel.js';
-import { isSpineVersion, type Json, SPINE_VERSION } from './4.2/skel-format.js';
-import { skelToJson } from './4.2/skel-to-json.js';
+import { jsonToSkel } from './4.x/json-to-skel.js';
+import { isSpineVersion, type Json, wrongVersion } from './4.x/skel-format.js';
+import { skelToJson } from './4.x/skel-to-json.js';
 import { skeletonVersion } from './skeleton-version.js';
 
 export type SkeletonFormat = 'json' | 'skel';
@@ -49,9 +49,11 @@ export function optimizeSkeleton(
   if (!source) return results;
   const base = source.name.replace(/\.[^./]*$/, '');
   const trims = options.animations !== true || options.skins !== undefined;
-  const wanted: SkeletonFormat[] = options.skeleton ? [options.skeleton] : [...(json ? ['json' as const] : []), ...(skel ? ['skel' as const] : [])];
+  const wanted: SkeletonFormat[] = options.skeleton
+    ? [options.skeleton]
+    : [...(json ? ['json' as const] : []), ...(skel ? ['skel' as const] : [])];
 
-  // the trimmed skeleton, made once: from the .json when there is one, else read from a 4.2 .skel
+  // the trimmed skeleton, made once: from the .json when there is one, else read from a 4.1 or 4.2 .skel
   let trimmed: Json | null | undefined;
   const trimmedSkeleton = (): Json | null => {
     if (trimmed !== undefined) return trimmed;
@@ -63,7 +65,7 @@ export function optimizeSkeleton(
   const version = parsed ? (parsed.skeleton.spine as string) : skeletonVersion((skel as SkeletonSource).data, 'skel');
   const convertible = isSpineVersion(version);
   const keep = (file: SkeletonSource, what: string) => {
-    warnings.push(`${file.name}: Spine ${version ?? 'of an unknown version'} is not converted, only ${SPINE_VERSION}; ${what}`);
+    warnings.push(`${file.name}: ${wrongVersion(version).message}; ${what}`);
     results.push(file);
   };
   const trimmedJson = () => ({ name: `${base}.json`, data: writeJson(trimmedSkeleton() as Json, options.precision) });
@@ -121,7 +123,8 @@ function keptNames(names: string[], wanted: NamePatterns, what: string, where: s
   if (include && exclude) throw new Error(`${what} takes include or exclude, not both`);
   const patterns = include ?? exclude ?? [];
   for (const pattern of patterns) {
-    if (!names.some((name) => picomatch.isMatch(name, pattern))) warnings.push(`${where}: ${what} pattern "${pattern}" matches nothing`);
+    if (!names.some((name) => picomatch.isMatch(name, pattern)))
+      warnings.push(`${where}: ${what} pattern "${pattern}" matches nothing`);
   }
   return new Set(names.filter((name) => !patterns.length || picomatch.isMatch(name, patterns) !== Boolean(exclude)));
 }
@@ -155,7 +158,8 @@ function trimSkeleton(where: string, json: Json, options: SkeletonOptions, warni
     for (const name of keep) {
       const skin = list.find((item) => item.name === name);
       for (const slot of Object.values<Json>(skin?.attachments ?? {})) {
-        for (const attachment of Object.values<Json>(slot)) if (attachment.parent && attachment.skin) keep.add(attachment.skin);
+        for (const attachment of Object.values<Json>(slot))
+          if (attachment.parent && attachment.skin) keep.add(attachment.skin);
       }
     }
     json.skins = list.filter((skin) => keep.has(skin.name));

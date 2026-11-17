@@ -9,7 +9,7 @@ import picomatch from 'picomatch';
 import { destinationPath } from '../files.js';
 import type { ActionDefinition, AssetFile, AssetMeta, OptionTable, TransformResult } from '../types.js';
 import { basename, dirname, extension, join } from '../utils/fs.js';
-import { image, type ImageOptions } from './image.js';
+import { encoderOptions, image, type ImageOptions } from './image.js';
 import { resolveOptions, transformFiles } from './index.js';
 
 type GltfFormat = 'glb' | 'gltf' | 'gltf-embedded';
@@ -34,7 +34,16 @@ export interface GltfOptions extends Record<string, unknown> {
   format?: GltfFormat;
   quantize: boolean;
   simplify: { ratio?: number; error: number; method: 'collapse' | 'sloppy' };
-  textures: { format?: TextureFormat; quality?: number; maxWidth?: number; maxHeight?: number; extract: boolean };
+  textures: {
+    format?: TextureFormat;
+    quality?: number;
+    maxWidth?: number;
+    maxHeight?: number;
+    extract: boolean;
+    jpeg: ImageOptions['jpeg'];
+    webp: ImageOptions['webp'];
+    avif: ImageOptions['avif'];
+  };
   normals: boolean;
   tangents: boolean;
   uvs: boolean;
@@ -137,7 +146,9 @@ const options: OptionTable = {
         kind: 'boolean',
         description: 'Write the textures as files next to the model and remove them from it',
         default: false
-      }
+      },
+      // the encoder settings of re-encoded textures, as in the image action; png stays lossless, so it has none
+      ...encoderOptions(['jpeg', 'webp', 'avif'])
     }
   },
   normals: keep('normals'),
@@ -207,7 +218,7 @@ const options: OptionTable = {
 export const gltf: GltfAction = {
   name: 'gltf',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 5,
+  version: 6,
   cache: true,
   accepts: ['glb', 'gltf'],
   options,
@@ -532,10 +543,10 @@ function removeData(doc: Document, options: GltfOptions): void {
 }
 
 async function processTextures(doc: Document, modelName: string, options: GltfOptions, tools: GltfTransform) {
-  const { format, quality, maxWidth, maxHeight, extract } = options.textures;
+  const { format, quality, maxWidth, maxHeight, extract, jpeg, webp, avif } = options.textures;
   const reencode = format !== undefined || quality !== undefined || maxWidth !== undefined || maxHeight !== undefined;
   // a palette would band normal and roughness maps, so png textures stay lossless
-  const imageOptions: Partial<ImageOptions> = { png: { palette: false, colors: 256, dither: 1, effort: 7 } };
+  const imageOptions: Partial<ImageOptions> = { png: { palette: false, colors: 256, dither: 1, effort: 7 }, jpeg, webp, avif };
   if (format) imageOptions.format = format;
   if (quality !== undefined) imageOptions.quality = quality;
   if (maxWidth !== undefined) imageOptions.maxWidth = maxWidth;

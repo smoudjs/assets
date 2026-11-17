@@ -1,8 +1,10 @@
-// A Spine 4.2 skeleton .json as a .skel. Nonessential data, which only the editor uses, is left out.
+// A Spine 4.1 or 4.2 skeleton .json as a .skel. Nonessential data, which only the editor uses, is left out. Both
+// versions write most sections alike; 4.2 packs constraints and attachments into flags and adds physics.
 
 import {
   ATTACHMENT_TYPES,
   BLEND,
+  BONE_FLOATS,
   BONE_INHERIT,
   BONE_TIMELINES,
   CURVE_BEZIER,
@@ -11,9 +13,8 @@ import {
   colorBytes,
   enumIndex,
   INHERIT,
-  isSpineVersion,
   type Json,
-  wrongVersion,
+  mixValues,
   Output,
   PATH_TIMELINES,
   PHYSICS_GLOBALS,
@@ -24,7 +25,10 @@ import {
   ROTATE_MODE,
   SEQUENCE_MODE,
   SLOT_TIMELINES,
-  SPACING_MODE
+  SPACING_MODE,
+  spineVersion,
+  TRANSFORM_OFFSETS,
+  wrongVersion
 } from './skel-format.js';
 
 const isWhite = (text: string | undefined) => text == null || rgba8888(text) === -1;
@@ -67,16 +71,28 @@ function writeCurveTimeline(out: Output, keys: Json[], values: number, writeValu
 const writeTimeline1 = (out: Output, keys: Json[], fallback: number) =>
   writeCurveTimeline(out, keys, 1, (key) => out.float(key.value ?? fallback));
 
-/** A Spine 4.2 skeleton .json, parsed, as a .skel. Throws on another version and on data a .skel cannot hold. */
+// flags with the bit of each value that is not 0, from the first bit given on
+function nonZeroFlags(values: number[], firstBit: number): number {
+  let flags = 0;
+  values.forEach((v, i) => {
+    if (v !== 0) flags |= firstBit << i;
+  });
+  return flags;
+}
+
+/** A Spine 4.1 or 4.2 skeleton .json, parsed, as a .skel. Throws on another version and on data a .skel cannot hold. */
 export function jsonToSkel(json: Json): Buffer {
   const skeleton: Json = json.skeleton ?? {};
-  if (!isSpineVersion(skeleton.spine)) throw wrongVersion(skeleton.spine);
+  const version = spineVersion(skeleton.spine);
+  if (!version) throw wrongVersion(skeleton.spine);
+  const v41 = version === '4.1';
   const bones: Json[] = json.bones ?? [];
   const slots: Json[] = json.slots ?? [];
   const ik: Json[] = json.ik ?? [];
   const transform: Json[] = json.transform ?? [];
   const path: Json[] = json.path ?? [];
   const physics: Json[] = json.physics ?? [];
+  if (v41 && physics.length) throw new Error('Spine 4.1 has no physics');
   const skins: Json[] = json.skins ?? [];
   const events: Json = json.events ?? {};
   const animations: Json = json.animations ?? {};
@@ -105,6 +121,8 @@ export function jsonToSkel(json: Json): Buffer {
     out.varint(names.length);
     for (const name of names) out.varint(lookup(boneIndex, name, 'bone'));
   };
+  // 4.1 names events and skins from the string table, 4.2 writes them in place
+  const writeName = (name: string) => (v41 ? out.varint(ref(name)) : out.string(name));
 
   out.varint(bones.length);
   bones.forEach((bone, i) => {
@@ -115,15 +133,9 @@ export function jsonToSkel(json: Json): Buffer {
     } else if (bone.parent) {
       throw new Error('the first bone must be the root');
     }
-    out.float(bone.rotation ?? 0);
-    out.float(bone.x ?? 0);
-    out.float(bone.y ?? 0);
-    out.float(bone.scaleX ?? 1);
-    out.float(bone.scaleY ?? 1);
-    out.float(bone.shearX ?? 0);
-    out.float(bone.shearY ?? 0);
-    out.float(bone.length ?? 0);
-    out.byte(enumIndex(INHERIT, bone.inherit ?? 'normal', 'inherit mode'));
+    for (const [key, fallback] of BONE_FLOATS) out.float(bone[key] ?? fallback);
+    // 4.1 calls it transform and writes a varint, 4.2 a byte: the same byte for these few values
+    out.byte(enumIndex(INHERIT, bone.inherit ?? bone.transform ?? 'normal', 'inherit mode'));
     out.bool(bone.skin);
   });
 
@@ -141,13 +153,21 @@ export function jsonToSkel(json: Json): Buffer {
   for (const c of ik) {
     out.string(c.name);
     out.varint(c.order ?? 0);
+    if (v41) out.bool(c.skin);
     boneList(c.bones);
     out.varint(lookup(boneIndex, c.target, 'bone'));
     const mix = c.mix ?? 1;
     const softness = c.softness ?? 0;
+    const bendPositive = c.bendPositive ?? true;
+    if (v41) {
+      out.floats([mix, softness]);
+      out.byte(bendPositive ? 1 : -1);
+      for (const value of [c.compress, c.stretch, c.uniform]) out.bool(value);
+      continue;
+    }
     let flags = 0;
     if (c.skin) flags |= 1;
-    if (c.bendPositive ?? true) flags |= 2;
+    if (bendPositive) flags |= 2;
     if (c.compress) flags |= 4;
     if (c.stretch) flags |= 8;
     if (c.uniform) flags |= 16;
@@ -163,25 +183,22 @@ export function jsonToSkel(json: Json): Buffer {
   for (const c of transform) {
     out.string(c.name);
     out.varint(c.order ?? 0);
+    if (v41) out.bool(c.skin);
     boneList(c.bones);
     out.varint(lookup(boneIndex, c.target, 'bone'));
-    const mixX = c.mixX ?? 1;
-    const mixScaleX = c.mixScaleX ?? 1;
-    // a value of 0 is left out, its flag unset
-    const offsets = [c.rotation ?? 0, c.x ?? 0, c.y ?? 0, c.scaleX ?? 0, c.scaleY ?? 0];
-    const rest = [c.shearY ?? 0, c.mixRotate ?? 1, mixX, c.mixY ?? mixX, mixScaleX, c.mixScaleY ?? mixScaleX, c.mixShearY ?? 1];
-    let flags = (c.skin ? 1 : 0) | (c.local ? 2 : 0) | (c.relative ? 4 : 0);
-    offsets.forEach((v, i) => {
-      if (v !== 0) flags |= 8 << i;
-    });
-    out.byte(flags);
-    for (const v of offsets) if (v !== 0) out.float(v);
-    flags = 0;
-    rest.forEach((v, i) => {
-      if (v !== 0) flags |= 1 << i;
-    });
-    out.byte(flags);
-    for (const v of rest) if (v !== 0) out.float(v);
+    const values = [...TRANSFORM_OFFSETS.map((key) => c[key] ?? 0), ...mixValues(c)];
+    if (v41) {
+      out.bool(c.local);
+      out.bool(c.relative);
+      out.floats(values);
+      continue;
+    }
+    // 4.2 leaves out a value of 0, its flag unset: the first five in one byte, the other seven in the next
+    const [first, rest] = [values.slice(0, 5), values.slice(5)];
+    out.byte((c.skin ? 1 : 0) | (c.local ? 2 : 0) | (c.relative ? 4 : 0) | nonZeroFlags(first, 8));
+    out.floats(first.filter((v) => v !== 0));
+    out.byte(nonZeroFlags(rest, 1));
+    out.floats(rest.filter((v) => v !== 0));
   }
 
   out.varint(path.length);
@@ -191,23 +208,23 @@ export function jsonToSkel(json: Json): Buffer {
     out.bool(c.skin);
     boneList(c.bones);
     out.varint(lookup(slotIndex, c.target, 'slot'));
+    const modes = [
+      enumIndex(POSITION_MODE, c.positionMode ?? 'percent', 'position mode'),
+      enumIndex(SPACING_MODE, c.spacingMode ?? 'length', 'spacing mode'),
+      enumIndex(ROTATE_MODE, c.rotateMode ?? 'tangent', 'rotate mode')
+    ] as [number, number, number];
     const rotation = c.rotation ?? 0;
-    out.byte(
-      enumIndex(POSITION_MODE, c.positionMode ?? 'percent', 'position mode') |
-        (enumIndex(SPACING_MODE, c.spacingMode ?? 'length', 'spacing mode') << 1) |
-        (enumIndex(ROTATE_MODE, c.rotateMode ?? 'tangent', 'rotate mode') << 3) |
-        (rotation !== 0 ? 128 : 0)
-    );
-    if (rotation !== 0) out.float(rotation);
-    const mixX = c.mixX ?? 1;
-    out.float(c.position ?? 0);
-    out.float(c.spacing ?? 0);
-    out.float(c.mixRotate ?? 1);
-    out.float(mixX);
-    out.float(c.mixY ?? mixX);
+    if (v41) {
+      for (const mode of modes) out.varint(mode);
+      out.float(rotation);
+    } else {
+      out.byte(modes[0] | (modes[1] << 1) | (modes[2] << 3) | (rotation !== 0 ? 128 : 0));
+      if (rotation !== 0) out.float(rotation);
+    }
+    out.floats([c.position ?? 0, c.spacing ?? 0, ...mixValues(c, 3)]);
   }
 
-  out.varint(physics.length);
+  if (!v41) out.varint(physics.length);
   for (const c of physics) {
     out.string(c.name);
     out.varint(c.order ?? 0);
@@ -216,24 +233,19 @@ export function jsonToSkel(json: Json): Buffer {
     const limit = c.limit ?? 5000;
     const mass = c.mass ?? 1;
     const mix = c.mix ?? 1;
-    let flags = c.skin ? 1 : 0;
-    optional.forEach((v, i) => {
-      if (v !== 0) flags |= 2 << i;
-    });
+    let flags = (c.skin ? 1 : 0) | nonZeroFlags(optional, 2);
     if (limit !== 5000) flags |= 64;
     if (mass !== 1) flags |= 128;
     out.byte(flags);
-    for (const v of optional) if (v !== 0) out.float(v);
+    out.floats(optional.filter((v) => v !== 0));
     if (limit !== 5000) out.float(limit);
     const fps = Math.round(c.fps ?? 60);
     if (fps < 1 || fps > 255) throw new Error(`physics ${c.name}: fps ${c.fps} is outside the 1 to 255 a .skel holds`);
     out.byte(fps);
-    out.float(c.inertia ?? 1);
-    out.float(c.strength ?? 100);
-    out.float(c.damping ?? 1);
+    out.floats([c.inertia ?? 1, c.strength ?? 100, c.damping ?? 1]);
+    // the .skel holds the inverse of the mass
     if (mass !== 1) out.float(1 / mass);
-    out.float(c.wind ?? 0);
-    out.float(c.gravity ?? 0);
+    out.floats([c.wind ?? 0, c.gravity ?? 0]);
     flags = 0;
     PHYSICS_GLOBALS.forEach((key, i) => {
       if (c[key]) flags |= 1 << i;
@@ -252,30 +264,109 @@ export function jsonToSkel(json: Json): Buffer {
 
   // unweighted: x, y per vertex. Weighted: per vertex its bone count, then bone, x, y and weight per bone
   const writeVertices = (vertices: number[], vertexCount: number) => {
-    out.varint(vertexCount);
-    if (vertices.length === vertexCount * 2) {
-      for (const v of vertices) out.float(v);
-      return;
-    }
-    for (let i = 0; i < vertices.length; ) {
+    if (vertices.length === vertexCount * 2) return out.floats(vertices);
+    for (let i = 0; i < vertices.length;) {
       const boneCount = vertices[i++] as number;
       out.varint(boneCount);
       for (const end = i + boneCount * 4; i < end; i += 4) {
         out.varint(vertices[i] as number);
-        out.float(vertices[i + 1] as number);
-        out.float(vertices[i + 2] as number);
-        out.float(vertices[i + 3] as number);
+        out.floats(vertices.slice(i + 1, i + 4));
       }
     }
   };
 
-  const writeAttachment = (map: Json, key: string) => {
-    const name: string = map.name ?? key;
+  const writeSequence = (sequence: Json) => {
+    for (const value of [sequence.count ?? 0, sequence.start ?? 1, sequence.digits ?? 0, sequence.setup ?? 0])
+      out.varint(value);
+  };
+
+  const regionFloats = (map: Json) => [
+    map.x ?? 0,
+    map.y ?? 0,
+    map.scaleX ?? 1,
+    map.scaleY ?? 1,
+    map.width ?? 32,
+    map.height ?? 32
+  ];
+
+  // a .skel does not store the triangle count in 4.2: it follows from the vertices and the hull
+  const checkTriangles = (map: Json, name: string, vertexCount: number, hull: number) => {
+    if (map.triangles.length === (vertexCount * 2 - hull - 2) * 3) return;
+    throw new Error(
+      `mesh ${name}: ${map.triangles.length / 3} triangles for ${vertexCount} vertices and a hull of ${hull}, which a .skel cannot hold`
+    );
+  };
+
+  // 4.1: the name and a type byte, then each value in place; a boolean says whether the vertices are weighted
+  const writeAttachment41 = (map: Json, name: string, type: string, typeId: number, key: string) => {
+    out.varint(name !== key ? ref(name) : 0);
+    out.byte(typeId);
+    const imagePath: string = map.path ?? name;
+    const writePath = () => out.varint(imagePath !== name ? ref(imagePath) : 0);
+    const sequence = () => {
+      out.bool(map.sequence);
+      if (map.sequence) writeSequence(map.sequence);
+    };
+    const vertexCount = map.vertexCount ?? 0;
+    const vertices = (count = vertexCount) => {
+      const list: number[] = map.vertices ?? [];
+      out.bool(list.length !== count * 2);
+      writeVertices(list, count);
+    };
+    switch (type) {
+      case 'region':
+        writePath();
+        out.floats([map.rotation ?? 0, ...regionFloats(map)]);
+        out.int32(rgba8888(map.color ?? 'ffffffff'));
+        sequence();
+        break;
+      case 'mesh': {
+        writePath();
+        out.int32(rgba8888(map.color ?? 'ffffffff'));
+        const count = map.uvs.length >> 1;
+        out.varint(count);
+        out.floats(map.uvs);
+        out.varint(map.triangles.length);
+        for (const t of map.triangles) out.short(t);
+        vertices(count);
+        out.varint(map.hull ?? 0);
+        sequence();
+        break;
+      }
+      case 'linkedmesh':
+        writePath();
+        out.int32(rgba8888(map.color ?? 'ffffffff'));
+        out.varint(ref(map.skin));
+        out.varint(ref(map.parent));
+        out.bool(map.timelines ?? true);
+        sequence();
+        break;
+      case 'boundingbox':
+        out.varint(vertexCount);
+        vertices();
+        break;
+      case 'path':
+        out.bool(map.closed);
+        out.bool(map.constantSpeed ?? true);
+        out.varint(vertexCount);
+        vertices();
+        out.floats(Array.from({ length: vertexCount / 3 }, (_, i) => map.lengths?.[i] ?? 0));
+        break;
+      case 'point':
+        out.floats([map.rotation ?? 0, map.x ?? 0, map.y ?? 0]);
+        break;
+      case 'clipping':
+        if (!map.end) throw new Error(`clipping ${name} has no end slot`);
+        out.varint(lookup(slotIndex, map.end, 'slot'));
+        out.varint(vertexCount);
+        vertices();
+        break;
+    }
+  };
+
+  // 4.2: one flags byte carries the type and says which values follow
+  const writeAttachment42 = (map: Json, name: string, type: string, typeId: number, key: string) => {
     const nameFlag = name !== key ? 8 : 0;
-    let type: string = map.type ?? 'region';
-    if (type === 'mesh' && map.parent) type = 'linkedmesh';
-    const typeId = ATTACHMENT_TYPES.indexOf(type);
-    if (typeId < 0) throw new Error(`unknown attachment type: ${type}`);
     const writeName = () => {
       if (nameFlag) out.varint(ref(name));
     };
@@ -291,32 +382,18 @@ export function jsonToSkel(json: Json): Buffer {
       writeName();
       if (flags & 16) out.varint(ref(imagePath));
       if (hasColor) out.int32(rgba8888(map.color));
-      if (map.sequence) {
-        out.varint(map.sequence.count ?? 0);
-        out.varint(map.sequence.start ?? 1);
-        out.varint(map.sequence.digits ?? 0);
-        out.varint(map.sequence.setup ?? 0);
-      }
+      if (map.sequence) writeSequence(map.sequence);
       if (type === 'region') {
         if (flags & 128) out.float(map.rotation);
-        out.float(map.x ?? 0);
-        out.float(map.y ?? 0);
-        out.float(map.scaleX ?? 1);
-        out.float(map.scaleY ?? 1);
-        out.float(map.width ?? 32);
-        out.float(map.height ?? 32);
+        out.floats(regionFloats(map));
       } else if (type === 'mesh') {
         const vertexCount = map.uvs.length >> 1;
         const hull = map.hull ?? 0;
-        // a .skel does not store the triangle count: it follows from the vertices and the hull
-        if (map.triangles.length !== (vertexCount * 2 - hull - 2) * 3) {
-          throw new Error(
-            `mesh ${name}: ${map.triangles.length / 3} triangles for ${vertexCount} vertices and a hull of ${hull}, which a .skel cannot hold`
-          );
-        }
+        checkTriangles(map, name, vertexCount, hull);
         out.varint(hull);
+        out.varint(vertexCount);
         writeVertices(map.vertices, vertexCount);
-        for (const v of map.uvs) out.float(v);
+        out.floats(map.uvs);
         for (const t of map.triangles) out.varint(t);
       } else {
         out.varint(lookup(skinIndex, map.skin ?? 'default', 'skin'));
@@ -328,35 +405,45 @@ export function jsonToSkel(json: Json): Buffer {
     const vertexCount = map.vertexCount ?? 0;
     const vertices: number[] = map.vertices ?? [];
     const weighted = vertices.length !== vertexCount * 2;
+    const writeAllVertices = () => {
+      out.varint(vertexCount);
+      writeVertices(vertices, vertexCount);
+    };
     switch (type) {
       case 'boundingbox':
         out.byte(typeId | nameFlag | (weighted ? 16 : 0));
         writeName();
-        writeVertices(vertices, vertexCount);
+        writeAllVertices();
         break;
       case 'path': {
         out.byte(typeId | nameFlag | (map.closed ? 16 : 0) | ((map.constantSpeed ?? true) ? 32 : 0) | (weighted ? 64 : 0));
         writeName();
-        writeVertices(vertices, vertexCount);
-        const lengths: number[] = map.lengths ?? [];
-        for (let i = 0; i < vertexCount / 3; i++) out.float(lengths[i] ?? 0);
+        writeAllVertices();
+        out.floats(Array.from({ length: vertexCount / 3 }, (_, i) => map.lengths?.[i] ?? 0));
         break;
       }
       case 'point':
         out.byte(typeId | nameFlag);
         writeName();
-        out.float(map.rotation ?? 0);
-        out.float(map.x ?? 0);
-        out.float(map.y ?? 0);
+        out.floats([map.rotation ?? 0, map.x ?? 0, map.y ?? 0]);
         break;
       case 'clipping':
         out.byte(typeId | nameFlag | (weighted ? 16 : 0));
         writeName();
         if (!map.end) throw new Error(`clipping ${name} has no end slot`);
         out.varint(lookup(slotIndex, map.end, 'slot'));
-        writeVertices(vertices, vertexCount);
+        writeAllVertices();
         break;
     }
+  };
+
+  const writeAttachment = (map: Json, key: string) => {
+    const name: string = map.name ?? key;
+    let type: string = map.type ?? 'region';
+    if (type === 'mesh' && map.parent) type = 'linkedmesh';
+    const typeId = ATTACHMENT_TYPES.indexOf(type);
+    if (typeId < 0) throw new Error(`unknown attachment type: ${type}`);
+    (v41 ? writeAttachment41 : writeAttachment42)(map, name, type, typeId, key);
   };
 
   const writeSkinAttachments = (skin: Json) => {
@@ -387,11 +474,11 @@ export function jsonToSkel(json: Json): Buffer {
     ['bones', boneIndex, 'bone'],
     ['ik', ikIndex, 'ik constraint'],
     ['transform', transformIndex, 'transform constraint'],
-    ['path', pathIndex, 'path constraint'],
-    ['physics', physicsIndex, 'physics constraint']
+    ['path', pathIndex, 'path constraint']
   ];
+  if (!v41) skinLists.push(['physics', physicsIndex, 'physics constraint']);
   for (const skin of otherSkins) {
-    out.string(skin.name);
+    writeName(skin.name);
     for (const [key, map, what] of skinLists) {
       const names: string[] = skin[key] ?? [];
       out.varint(names.length);
@@ -403,15 +490,12 @@ export function jsonToSkel(json: Json): Buffer {
   out.varint(eventNames.length);
   for (const name of eventNames) {
     const event = events[name];
-    out.string(name);
+    writeName(name);
     out.varint(event.int ?? 0, false);
     out.float(event.float ?? 0);
     out.string(event.string ?? '');
     out.string(event.audio ?? null);
-    if (event.audio) {
-      out.float(event.volume ?? 1);
-      out.float(event.balance ?? 0);
-    }
+    if (event.audio) out.floats([event.volume ?? 1, event.balance ?? 0]);
   }
 
   const animationNames = Object.keys(animations);
@@ -455,14 +539,21 @@ export function jsonToSkel(json: Json): Buffer {
           const two = type === 'rgba2' || type === 'rgb2';
           const alpha = type === 'rgba' || type === 'rgba2';
           writeCurveTimeline(o, keys, (alpha ? 4 : 3) + (two ? 3 : 0), (key) => {
-            const bytes = two ? [...colorBytes(key.light, alpha), ...colorBytes(key.dark, false)] : colorBytes(key.color, alpha);
+            const bytes = two
+              ? [...colorBytes(key.light, alpha), ...colorBytes(key.dark, false)]
+              : colorBytes(key.color, alpha);
             for (const b of bytes) o.byte(b);
           });
         }
       }
     }
 
-    const boneGroups = groups(animation.bones, boneIndex, 'bone', (type) => type in BONE_TIMELINES || type === 'inherit');
+    const boneGroups = groups(
+      animation.bones,
+      boneIndex,
+      'bone',
+      (type) => type in BONE_TIMELINES || (!v41 && type === 'inherit')
+    );
     o.varint(boneGroups.length);
     for (const [index, list] of boneGroups) {
       o.varint(index);
@@ -482,17 +573,13 @@ export function jsonToSkel(json: Json): Buffer {
         o.byte(id);
         o.varint(keys.length);
         if (names) {
-          writeCurveTimeline(o, keys, 2, (key) => {
-            o.float(key[names[0]] ?? fallback);
-            o.float(key[names[1]] ?? fallback);
-          });
+          writeCurveTimeline(o, keys, 2, (key) => o.floats([key[names[0]] ?? fallback, key[names[1]] ?? fallback]));
         } else {
           writeTimeline1(o, keys, fallback);
         }
       }
     }
 
-    // an ik key packs its booleans and its curve kind into one byte
     const ikList = Object.entries<Json[]>(animation.ik ?? {}).filter(([, keys]) => filled(keys));
     o.varint(ikList.length);
     for (const [name, keys] of ikList) {
@@ -503,11 +590,22 @@ export function jsonToSkel(json: Json): Buffer {
       keys.forEach((key, i) => {
         const mix = key.mix ?? 1;
         const softness = key.softness ?? 0;
+        const bendPositive = key.bendPositive ?? true;
+        // 4.1: the values, the curve leading to this key, then the booleans
+        if (v41) {
+          o.floats([key.time ?? 0, mix, softness]);
+          if (i > 0) writeCurve(o, keys[i - 1] as Json, 2);
+          o.byte(bendPositive ? 1 : -1);
+          o.bool(key.compress);
+          o.bool(key.stretch);
+          return;
+        }
+        // 4.2 packs the booleans and the curve kind into one byte
         let flags = 0;
         if (mix !== 0) flags |= 1;
         if (mix !== 0 && mix !== 1) flags |= 2;
         if (softness !== 0) flags |= 4;
-        if (key.bendPositive ?? true) flags |= 8;
+        if (bendPositive) flags |= 8;
         if (key.compress) flags |= 16;
         if (key.stretch) flags |= 32;
         const previous = i > 0 ? keys[i - 1]?.curve : null;
@@ -527,13 +625,7 @@ export function jsonToSkel(json: Json): Buffer {
       timelines++;
       o.varint(lookup(transformIndex, name, 'transform constraint'));
       o.varint(keys.length);
-      writeCurveTimeline(o, keys, 6, (key) => {
-        const mixX = key.mixX ?? 1;
-        const mixScaleX = key.mixScaleX ?? 1;
-        for (const v of [key.mixRotate ?? 1, mixX, key.mixY ?? mixX, mixScaleX, key.mixScaleY ?? mixScaleX, key.mixShearY ?? 1]) {
-          o.float(v);
-        }
-      });
+      writeCurveTimeline(o, keys, 6, (key) => o.floats(mixValues(key)));
     }
 
     const pathGroups = groups(animation.path, pathIndex, 'path constraint', (type) => PATH_TIMELINES.includes(type));
@@ -545,43 +637,48 @@ export function jsonToSkel(json: Json): Buffer {
         timelines++;
         o.byte(PATH_TIMELINES.indexOf(type));
         o.varint(keys.length);
-        if (type === 'mix') {
-          writeCurveTimeline(o, keys, 3, (key) => {
-            const mixX = key.mixX ?? 1;
-            o.float(key.mixRotate ?? 1);
-            o.float(mixX);
-            o.float(key.mixY ?? mixX);
-          });
-        } else {
-          writeTimeline1(o, keys, 0);
-        }
+        if (type === 'mix') writeCurveTimeline(o, keys, 3, (key) => o.floats(mixValues(key, 3)));
+        else writeTimeline1(o, keys, 0);
       }
     }
 
     // an empty constraint name stands for every physics constraint, index 0; the others are their index plus one
-    const physicsGroups = Object.entries<Json>(animation.physics ?? {})
-      .map(([name, types]) => {
-        const list = Object.entries<Json[]>(types).filter(([type, keys]) => type in PHYSICS_TIMELINES && filled(keys));
-        return [name ? lookup(physicsIndex, name, 'physics constraint') + 1 : 0, list] as const;
-      })
-      .filter(([, list]) => list.length);
-    o.varint(physicsGroups.length);
-    for (const [index, list] of physicsGroups) {
-      o.varint(index);
-      o.varint(list.length);
-      for (const [type, keys] of list) {
-        timelines++;
-        o.byte(PHYSICS_TIMELINES[type] as number);
-        o.varint(keys.length);
-        if (type === 'reset') {
-          for (const key of keys) o.float(key.time ?? 0);
-        } else {
-          writeTimeline1(o, keys, 0);
+    if (!v41) {
+      const physicsGroups = Object.entries<Json>(animation.physics ?? {})
+        .map(([name, types]) => {
+          const list = Object.entries<Json[]>(types).filter(([type, keys]) => type in PHYSICS_TIMELINES && filled(keys));
+          return [name ? lookup(physicsIndex, name, 'physics constraint') + 1 : 0, list] as const;
+        })
+        .filter(([, list]) => list.length);
+      o.varint(physicsGroups.length);
+      for (const [index, list] of physicsGroups) {
+        o.varint(index);
+        o.varint(list.length);
+        for (const [type, keys] of list) {
+          timelines++;
+          o.byte(PHYSICS_TIMELINES[type] as number);
+          o.varint(keys.length);
+          if (type === 'reset') {
+            for (const key of keys) o.float(key.time ?? 0);
+          } else {
+            writeTimeline1(o, keys, 0);
+          }
         }
       }
     }
 
-    const attachmentSkins = Object.entries<Json>(animation.attachments ?? {});
+    // a 4.1 export downgraded from 4.2 may still hold deform timelines as 4.0 did, keyed by skin, slot and attachment
+    let attachmentTimelines: Json = animation.attachments ?? {};
+    if (v41 && animation.deform) {
+      attachmentTimelines = structuredClone(attachmentTimelines);
+      for (const [skin, slotMap] of Object.entries<Json>(animation.deform)) {
+        for (const [slot, items] of Object.entries<Json>(slotMap)) {
+          for (const [name, keys] of Object.entries(items))
+            (((attachmentTimelines[skin] ??= {})[slot] ??= {})[name] ??= {}).deform = keys;
+        }
+      }
+    }
+    const attachmentSkins = Object.entries<Json>(attachmentTimelines);
     o.varint(attachmentSkins.length);
     for (const [skinName, skinMap] of attachmentSkins) {
       o.varint(lookup(skinIndex, skinName, 'skin'));
@@ -614,7 +711,7 @@ export function jsonToSkel(json: Json): Buffer {
               if (!vertices?.length) return o.varint(0);
               o.varint(vertices.length);
               o.varint(key.offset ?? 0);
-              for (const v of vertices) o.float(v);
+              o.floats(vertices);
             });
           } else {
             let lastDelay = 0;
@@ -653,11 +750,10 @@ export function jsonToSkel(json: Json): Buffer {
       o.varint(eventIndex.get(key.name) as number);
       o.varint(key.int ?? data.int ?? 0, false);
       o.float(key.float ?? data.float ?? 0);
-      o.string(key.string ?? null);
-      if (data.audio) {
-        o.float(key.volume ?? 1);
-        o.float(key.balance ?? 0);
-      }
+      // 4.1 says whether a string follows, 4.2 writes none as null
+      if (v41) o.bool(key.string != null);
+      if (!v41 || key.string != null) o.string(key.string ?? null);
+      if (data.audio) o.floats([key.volume ?? 1, key.balance ?? 0]);
     }
 
     return timelines;
@@ -671,12 +767,10 @@ export function jsonToSkel(json: Json): Buffer {
     head.int32(0);
     head.int32(0);
   }
-  head.string(skeleton.spine);
-  head.float(skeleton.x ?? 0);
-  head.float(skeleton.y ?? 0);
-  head.float(skeleton.width ?? 0);
-  head.float(skeleton.height ?? 0);
-  head.float(skeleton.referenceScale ?? 100);
+  // only the version number: a downgraded export's 4.1-from-4.2.43 is 4.1
+  head.string(/^\d+(\.\d+)*/.exec(skeleton.spine)?.[0] ?? version);
+  head.floats([skeleton.x ?? 0, skeleton.y ?? 0, skeleton.width ?? 0, skeleton.height ?? 0]);
+  if (!v41) head.float(skeleton.referenceScale ?? 100);
   head.bool(false);
   head.varint(strings.size);
   for (const text of strings.keys()) head.string(text);

@@ -1,20 +1,25 @@
-// What the Spine 4.2 JSON and binary (.skel) exports share: names of modes and timelines in binary order, colors,
-// and the byte streams. The binary layout changes with every minor Spine version and a runtime reads only its own,
-// so everything in this folder is for 4.2 alone.
+// What the Spine 4.1 and 4.2 JSON and binary (.skel) exports share: names of modes and timelines in binary order,
+// field tables with the value the JSON means when a key is left out, colors, and the byte streams. A runtime reads
+// only the .skel of its own minor version; the two lay out most sections alike, and where they differ the converters
+// branch on the version. Spine 3 and 4.0 lay out even the header differently, and are not converted.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type Json = Record<string, any>;
 
-/** The Spine version this folder converts between JSON and .skel. */
-export const SPINE_VERSION = '4.2';
+/** The Spine versions converted between JSON and .skel. */
+export const SPINE_VERSIONS = ['4.1', '4.2'] as const;
+export type SpineVersion = (typeof SPINE_VERSIONS)[number];
 
-/** Whether a version, like `4.2.43`, is the one this folder converts. */
-export function isSpineVersion(version: string | null | undefined): boolean {
-  return typeof version === 'string' && (version === SPINE_VERSION || version.startsWith(`${SPINE_VERSION}.`));
+/** The converted version a version like `4.2.43`, or `4.1-from-4.2.43` as a downgraded export has it, is; else undefined. */
+export function spineVersion(version: string | null | undefined): SpineVersion | undefined {
+  if (typeof version !== 'string') return undefined;
+  return SPINE_VERSIONS.find((v) => version === v || version.startsWith(`${v}.`) || version.startsWith(`${v}-`));
 }
 
+export const isSpineVersion = (version: string | null | undefined) => spineVersion(version) !== undefined;
+
 export function wrongVersion(version: string | null | undefined): Error {
-  return new Error(`Spine ${version ?? 'of an unknown version'} is not converted, only ${SPINE_VERSION}`);
+  return new Error(`Spine ${version ?? 'of an unknown version'} is not converted, only ${SPINE_VERSIONS.join(' and ')}`);
 }
 
 export const INHERIT = ['normal', 'onlyTranslation', 'noRotationOrReflection', 'noScale', 'noScaleOrReflection'];
@@ -38,8 +43,10 @@ export const BONE_TIMELINES: Record<string, [number, [string, string] | null, nu
   shearx: [8, null, 0],
   sheary: [9, null, 0]
 };
+/** 4.2 only. */
 export const BONE_INHERIT = 10;
 export const PATH_TIMELINES = ['position', 'spacing', 'mix'];
+/** 4.2 only, as is everything physics. */
 export const PHYSICS_TIMELINES: Record<string, number> = {
   inertia: 0,
   strength: 1,
@@ -63,6 +70,42 @@ export const CURVE_LINEAR = 0;
 export const CURVE_STEPPED = 1;
 export const CURVE_BEZIER = 2;
 
+// the floats of a bone in binary order, with the value a bone without one has
+export const BONE_FLOATS: [string, number][] = [
+  ['rotation', 0],
+  ['x', 0],
+  ['y', 0],
+  ['scaleX', 1],
+  ['scaleY', 1],
+  ['shearX', 0],
+  ['shearY', 0],
+  ['length', 0]
+];
+// the offsets of a transform constraint in binary order; a missing one is 0
+export const TRANSFORM_OFFSETS = ['rotation', 'x', 'y', 'scaleX', 'scaleY', 'shearY'];
+
+// the mixes of a transform constraint or its keys in binary order; a path constraint has the first three
+const MIX_KEYS = ['mixRotate', 'mixX', 'mixY', 'mixScaleX', 'mixScaleY', 'mixShearY'];
+// mixY and mixScaleY without a value take mixX and mixScaleX, the others 1
+const mixFallback = (values: number[], i: number) => (i === 2 || i === 4 ? (values[i - 1] as number) : 1);
+
+/** The first `count` mixes of a constraint or key, those it leaves out filled in. */
+export function mixValues(map: Json, count = 6): number[] {
+  const values: number[] = [];
+  for (let i = 0; i < count; i++) values.push(map[MIX_KEYS[i] as string] ?? mixFallback(values, i));
+  return values;
+}
+
+/** Sets the mixes on a constraint or key, leaving out those that are what the JSON means without them. */
+export function putMixes(target: Json, values: number[]) {
+  values.forEach((value, i) => put(target, MIX_KEYS[i] as string, value, mixFallback(values, i)));
+}
+
+/** Sets a key unless its value is the fallback, null or undefined: what the JSON means without it. */
+export function put(target: Json, key: string, value: unknown, fallback?: unknown) {
+  if (value !== fallback && value !== null && value !== undefined) target[key] = value;
+}
+
 /** The index of a mode by its JSON name, which Spine writes with a lower or upper first letter. */
 export function enumIndex(values: string[], name: string, what: string): number {
   const index = values.indexOf(name.charAt(0).toLowerCase() + name.slice(1));
@@ -82,13 +125,17 @@ const hex = (text: string) => (text.charAt(0) === '#' ? text.slice(1) : text);
 export function rgba8888(text: string): number {
   const h = hex(text);
   const alpha = h.length === 8 ? parseInt(h.slice(6, 8), 16) : 255;
-  return ((parseInt(h.slice(0, 6), 16) << 8) | alpha) | 0;
+  return (parseInt(h.slice(0, 6), 16) << 8) | alpha | 0;
 }
 
 /** `rrggbb` as a 24-bit RGB value. */
 export const rgb888 = (text: string) => parseInt(hex(text).slice(0, 6), 16);
 
-export const colorText = (value: number, digits = 8) => (value >>> 0).toString(16).padStart(8, '0').slice(8 - digits);
+export const colorText = (value: number, digits = 8) =>
+  (value >>> 0)
+    .toString(16)
+    .padStart(8, '0')
+    .slice(8 - digits);
 
 export function colorBytes(text: string, alpha: boolean): number[] {
   const h = hex(text);
@@ -120,6 +167,11 @@ export class Output {
     this.byte(value ? 1 : 0);
   }
 
+  short(value: number) {
+    this.byte(value >>> 8);
+    this.byte(value);
+  }
+
   int32(value: number) {
     this.ensure(4);
     this.buf.writeInt32BE(value | 0, this.length);
@@ -131,6 +183,10 @@ export class Output {
     this.ensure(4);
     this.buf.writeFloatBE(value === 0 ? 0 : value, this.length);
     this.length += 4;
+  }
+
+  floats(values: number[]) {
+    for (const value of values) this.float(value);
   }
 
   varint(value: number, optimizePositive = true) {
@@ -181,6 +237,10 @@ export class Input {
     return this.byte() !== 0;
   }
 
+  short(): number {
+    return (this.byte() << 8) | this.byte();
+  }
+
   int32(): number {
     this.need(4);
     const value = this.buf.readInt32BE(this.at);
@@ -228,6 +288,10 @@ export class Input {
 
   varints(n: number): number[] {
     return Array.from({ length: n }, () => this.varint());
+  }
+
+  shorts(n: number): number[] {
+    return Array.from({ length: n }, () => this.short());
   }
 
   get done() {

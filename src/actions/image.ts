@@ -91,6 +91,75 @@ export interface ImageAction extends ActionDefinition<ImageOptions> {
 
 const formatValues = { kind: 'enum', values: FORMATS, description: 'Output format' } as const;
 
+/** A format another action writes images in; each has its own encoder settings. */
+export type EncoderFormat = 'png' | 'jpeg' | 'webp' | 'avif';
+
+// The encoder settings of each format. Every action that writes images takes these, for the formats it writes, so
+// "webp": { "alphaQuality": 10 } means the same everywhere.
+const ENCODERS: Record<EncoderFormat, OptionTable[string]> = {
+  png: {
+    kind: 'object',
+    description: 'PNG encoder',
+    properties: {
+      palette: { kind: 'boolean', description: 'Quantize to a palette (like pngquant)', default: true },
+      colors: { kind: 'number', description: 'Palette size', min: 2, max: 256, default: 256 },
+      dither: { kind: 'number', description: 'Dithering level', min: 0, max: 1, default: 1 },
+      effort: { kind: 'number', description: 'CPU effort 1-10', min: 1, max: 10, default: 7 }
+    }
+  },
+  jpeg: {
+    kind: 'object',
+    description: 'JPEG encoder',
+    properties: {
+      quality: { kind: 'number', description: 'JPEG quality, wins over the top-level quality', min: 1, max: 100 },
+      progressive: { kind: 'boolean', description: 'Progressive scan', default: false },
+      mozjpeg: { kind: 'boolean', description: 'mozjpeg optimizations', default: true },
+      chromaSubsampling: { kind: 'enum', description: 'Chroma subsampling', values: ['4:2:0', '4:4:4'], default: '4:2:0' }
+    }
+  },
+  webp: {
+    kind: 'object',
+    description: 'WebP encoder',
+    properties: {
+      quality: { kind: 'number', description: 'WebP quality, wins over the top-level quality', min: 1, max: 100 },
+      preset: {
+        kind: 'enum',
+        description: 'Tune the encoder for the content',
+        values: ['default', 'photo', 'picture', 'drawing', 'icon', 'text'],
+        default: 'default'
+      },
+      alphaQuality: { kind: 'number', description: 'Alpha channel quality', min: 0, max: 100, default: 100 },
+      nearLossless: { kind: 'boolean', description: 'Near-lossless mode', default: false },
+      smartSubsample: { kind: 'boolean', description: 'High-quality chroma subsampling', default: false },
+      effort: { kind: 'number', description: 'CPU effort 0-6', min: 0, max: 6, default: 6 }
+    }
+  },
+  avif: {
+    kind: 'object',
+    description: 'AVIF encoder',
+    properties: {
+      quality: {
+        kind: 'number',
+        description: 'AVIF quality; the top-level quality does not apply to avif',
+        min: 1,
+        max: 100,
+        default: 50
+      },
+      chromaSubsampling: { kind: 'enum', description: 'Chroma subsampling', values: ['4:2:0', '4:4:4'], default: '4:4:4' },
+      effort: { kind: 'number', description: 'CPU effort 0-9', min: 0, max: 9, default: 4 }
+    }
+  }
+};
+
+/** The encoder settings options of these formats, for an action that writes images in them. */
+export function encoderOptions(formats: EncoderFormat[]): OptionTable {
+  return Object.fromEntries(formats.map((format) => [format, ENCODERS[format]]));
+}
+
+/** What `encodeImage` needs: a quality, whether to stay lossless, and the encoder settings of the format. */
+export type EncoderSettings = Pick<ImageOptions, 'quality' | 'lossless' | 'png' | 'jpeg' | 'webp' | 'avif'> &
+  Partial<Pick<ImageOptions, 'gif'>>;
+
 const options: OptionTable = {
   maxWidth: {
     kind: 'number',
@@ -158,58 +227,7 @@ const options: OptionTable = {
   metadata: { kind: 'boolean', description: 'Keep EXIF / ICC metadata (orientation is always applied)', default: false },
   animated: { kind: 'boolean', description: 'Keep gif / webp animation; false takes the first frame', default: true },
   density: { kind: 'number', description: 'DPI used to rasterize svg sources', min: 1, default: 72 },
-  png: {
-    kind: 'object',
-    description: 'PNG encoder',
-    properties: {
-      palette: { kind: 'boolean', description: 'Quantize to a palette (like pngquant)', default: true },
-      colors: { kind: 'number', description: 'Palette size', min: 2, max: 256, default: 256 },
-      dither: { kind: 'number', description: 'Dithering level', min: 0, max: 1, default: 1 },
-      effort: { kind: 'number', description: 'CPU effort 1-10', min: 1, max: 10, default: 7 }
-    }
-  },
-  jpeg: {
-    kind: 'object',
-    description: 'JPEG encoder',
-    properties: {
-      quality: { kind: 'number', description: 'JPEG quality, wins over the top-level quality', min: 1, max: 100 },
-      progressive: { kind: 'boolean', description: 'Progressive scan', default: false },
-      mozjpeg: { kind: 'boolean', description: 'mozjpeg optimizations', default: true },
-      chromaSubsampling: { kind: 'enum', description: 'Chroma subsampling', values: ['4:2:0', '4:4:4'], default: '4:2:0' }
-    }
-  },
-  webp: {
-    kind: 'object',
-    description: 'WebP encoder',
-    properties: {
-      quality: { kind: 'number', description: 'WebP quality, wins over the top-level quality', min: 1, max: 100 },
-      preset: {
-        kind: 'enum',
-        description: 'Tune the encoder for the content',
-        values: ['default', 'photo', 'picture', 'drawing', 'icon', 'text'],
-        default: 'default'
-      },
-      alphaQuality: { kind: 'number', description: 'Alpha channel quality', min: 0, max: 100, default: 100 },
-      nearLossless: { kind: 'boolean', description: 'Near-lossless mode', default: false },
-      smartSubsample: { kind: 'boolean', description: 'High-quality chroma subsampling', default: false },
-      effort: { kind: 'number', description: 'CPU effort 0-6', min: 0, max: 6, default: 6 }
-    }
-  },
-  avif: {
-    kind: 'object',
-    description: 'AVIF encoder',
-    properties: {
-      quality: {
-        kind: 'number',
-        description: 'AVIF quality; the top-level quality does not apply to avif',
-        min: 1,
-        max: 100,
-        default: 50
-      },
-      chromaSubsampling: { kind: 'enum', description: 'Chroma subsampling', values: ['4:2:0', '4:4:4'], default: '4:4:4' },
-      effort: { kind: 'number', description: 'CPU effort 0-9', min: 0, max: 9, default: 4 }
-    }
-  },
+  ...encoderOptions(['png', 'jpeg', 'webp', 'avif']),
   gif: {
     kind: 'object',
     description: 'GIF encoder',
@@ -411,7 +429,12 @@ function applyResize(pipeline: Sharp, options: ImageOptions, meta: Metadata): Sh
   });
 }
 
-function encode(pipeline: Sharp, format: Format, options: ImageOptions): Sharp {
+/** Adds the encoder of a format to a Sharp pipeline, with the settings the image action would use. */
+export function encodeImage(pipeline: Sharp, format: EncoderFormat, settings: EncoderSettings): Sharp {
+  return encode(pipeline, format, settings);
+}
+
+function encode(pipeline: Sharp, format: Format, options: EncoderSettings): Sharp {
   switch (format) {
     case 'png':
       return pipeline.png({
@@ -446,13 +469,15 @@ function encode(pipeline: Sharp, format: Format, options: ImageOptions): Sharp {
         chromaSubsampling: options.avif.chromaSubsampling,
         effort: options.avif.effort
       });
-    case 'gif':
+    case 'gif': {
+      const gif = options.gif as ImageOptions['gif'];
       return pipeline.gif({
-        colors: options.gif.colors,
-        dither: options.gif.dither,
-        effort: options.gif.effort,
-        interFrameMaxError: options.gif.interFrameMaxError
+        colors: gif.colors,
+        dither: gif.dither,
+        effort: gif.effort,
+        interFrameMaxError: gif.interFrameMaxError
       });
+    }
   }
 }
 

@@ -5,6 +5,7 @@
 
 import sharp from 'sharp';
 import type { ActionDefinition, AssetFile, OptionTable } from '../types.js';
+import { encodeImage, encoderOptions, type ImageOptions } from './image.js';
 import { resolveOptions } from './index.js';
 import { destinationPath } from '../files.js';
 import { contentHash } from '../utils/fs.js';
@@ -25,10 +26,14 @@ export interface AtlasOptions extends Record<string, unknown> {
   powerOfTwo: boolean;
   format: PageFormat;
   quality?: number;
+  png: ImageOptions['png'];
+  jpeg: ImageOptions['jpeg'];
+  webp: ImageOptions['webp'];
+  avif: ImageOptions['avif'];
 }
 
-/** Page quality when `quality` is not set, matching the image action's defaults. png pages stay lossless instead. */
-const QUALITY_WHEN_UNSET = { jpeg: 80, webp: 80, avif: 50 };
+/** Page quality when `quality` is not set, matching the image action's default. avif has its own, as in image. */
+const QUALITY_WHEN_UNSET = 80;
 
 export interface AtlasSprite {
   /** Frame name, e.g. `hero/idle_01`. */
@@ -108,17 +113,19 @@ const options: OptionTable = {
   quality: {
     kind: 'number',
     description:
-      'Page quality. For png pages, setting it switches from lossless to a palette; unset, jpeg and webp use 80 and avif 50',
+      'Page quality. For png pages, setting it switches from lossless to a palette; unset, jpeg and webp use 80. avif uses its own',
     min: 1,
     max: 100
-  }
+  },
+  // the encoder settings of each page format, as in the image action
+  ...encoderOptions(['png', 'jpeg', 'webp', 'avif'])
 };
 
 /** Packs sprites into texture atlas pages with a TexturePacker-style JSON per page. */
 export const atlas: AtlasAction = {
   name: 'atlas',
   // bump whenever a code change alters the output: cached results of older versions stop matching
-  version: 2,
+  version: 3,
   cache: 'together',
   accepts: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'tif', 'tiff'],
   options,
@@ -428,25 +435,20 @@ function composePage(page: Page, options: AtlasOptions): Buffer {
   return pixels;
 }
 
-// png pages stay lossless unless a quality is given; then they are quantized to a palette like the image action does
+// Encoded as the image action does, with the page format's encoder settings. png pages stay lossless unless a quality
+// is given; then they are quantized to a palette. jpeg cannot hold transparency, so it goes onto black
 function encodePage(pixels: Buffer, page: Page, options: AtlasOptions): Promise<Buffer> {
-  const pipeline = sharp(pixels, { raw: { width: page.width, height: page.height, channels: 4 } });
-  const { quality } = options;
-  switch (options.format) {
-    case 'png':
-      return quality === undefined
-        ? pipeline.png({ compressionLevel: 9 }).toBuffer()
-        : pipeline.png({ compressionLevel: 9, palette: true, quality, colors: 256, dither: 1, effort: 7 }).toBuffer();
-    case 'jpeg':
-      return pipeline
-        .flatten({ background: '#000000' })
-        .jpeg({ quality: quality ?? QUALITY_WHEN_UNSET.jpeg, mozjpeg: true })
-        .toBuffer();
-    case 'webp':
-      return pipeline.webp({ quality: quality ?? QUALITY_WHEN_UNSET.webp }).toBuffer();
-    case 'avif':
-      return pipeline.avif({ quality: quality ?? QUALITY_WHEN_UNSET.avif }).toBuffer();
-  }
+  let pipeline = sharp(pixels, { raw: { width: page.width, height: page.height, channels: 4 } });
+  if (options.format === 'jpeg') pipeline = pipeline.flatten({ background: '#000000' });
+  const { quality, png, jpeg, webp, avif } = options;
+  return encodeImage(pipeline, options.format, {
+    quality: quality ?? QUALITY_WHEN_UNSET,
+    lossless: false,
+    png: { ...png, palette: png.palette && quality !== undefined },
+    jpeg,
+    webp,
+    avif
+  }).toBuffer();
 }
 
 /** The data file of a page in the `data` layout. `others` are the data files of the other pages. */

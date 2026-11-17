@@ -1,6 +1,6 @@
 {
   "name": "@smoud/assets",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Optimize every game asset with one command. Images, texture atlases, audio and audio sprites, glTF models with meshopt, Spine, fonts and bitmap fonts, video and JSON/XML, each compressed with the right tool. Names and formats stay, no file grows. Playable ad presets for HTML5 games.",
   "keywords": [
     "assets",

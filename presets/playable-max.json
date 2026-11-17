@@ -1,12 +1,12 @@
 {
   "defaults": {
     "image": { "quality": 60, "maxWidth": 2048, "maxHeight": 2048, "webp": { "alphaQuality": 80 } },
-    "atlas": { "format": "webp", "quality": 60 },
-    "bitmapfont": { "format": "webp", "quality": 60 },
+    "atlas": { "format": "webp", "quality": 60, "webp": { "alphaQuality": 70 } },
+    "bitmapfont": { "format": "webp", "quality": 60, "webp": { "alphaQuality": 70 } },
     "audio": { "format": "mp3", "bitrate": 64, "channels": 1 },
     "font": { "format": "woff2", "removeHinting": true },
-    "gltf": { "normals": false, "textures": { "extract": true, "format": "webp", "quality": 60, "maxWidth": 2048, "maxHeight": 2048 } },
-    "spine": { "format": "webp", "quality": 60, "maxWidth": 2048, "maxHeight": 2048 }
+    "gltf": { "normals": false, "textures": { "extract": true, "format": "webp", "quality": 60, "maxWidth": 2048, "maxHeight": 2048, "webp": { "alphaQuality": 70 } } },
+    "spine": { "format": "webp", "quality": 60, "maxWidth": 2048, "maxHeight": 2048, "webp": { "alphaQuality": 60 } }
   },
   "actions": [
     "spine",

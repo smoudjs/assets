@@ -91,13 +91,22 @@ describe('spine: pages and atlas', () => {
     // alpha with detail, which a lower alpha quality can save on; the fixture page has only two flat alphas
     const assets = await scratchAssets();
     const pixels = Buffer.alloc(64 * 64 * 4);
-    for (let i = 0; i < 64 * 64; i++) pixels.set([200, 120, 40, Math.round(127 + 127 * Math.sin(i * 0.37) * Math.cos(i * 0.11))], i * 4);
-    await assets.write('spine/hero/hero.png', await sharp(pixels, { raw: { width: 64, height: 64, channels: 4 } }).png().toBuffer());
+    for (let i = 0; i < 64 * 64; i++)
+      pixels.set([200, 120, 40, Math.round(127 + 127 * Math.sin(i * 0.37) * Math.cos(i * 0.11))], i * 4);
+    await assets.write(
+      'spine/hero/hero.png',
+      await sharp(pixels, { raw: { width: 64, height: 64, channels: 4 } })
+        .png()
+        .toBuffer()
+    );
     const pageSize = async (options) => {
       const { read } = await run({ source: assets.dir, ...spineOnly({ format: 'webp', ...options }) });
       return (await read('spine/hero/hero.webp')).length;
     };
-    assert.ok((await pageSize({ webp: { alphaQuality: 10 } })) < (await pageSize({})), 'a lower alpha quality makes a smaller page');
+    assert.ok(
+      (await pageSize({ webp: { alphaQuality: 10 } })) < (await pageSize({})),
+      'a lower alpha quality makes a smaller page'
+    );
   });
 
   it('jpeg is refused for a page with transparency, with a warning', async () => {
@@ -173,12 +182,15 @@ describe('spine: skeleton', () => {
     assert.match(typo.result.warnings.join('\n'), /"jump" matches nothing/);
   });
 
-  it('a .skel alone of a version other than 4.2 is kept as it is, with a warning when animations are set', async () => {
+  it('a .skel alone of a version other than 4.1 and 4.2 is kept as it is, with a warning when animations are set', async () => {
     const assets = await scratchAssets();
     await assets.remove('spine/hero/hero.json');
     const { result, read } = await run({ source: assets.dir, ...spineOnly({ animations: { exclude: ['idle'] } }) });
     assert.equal(result.ok, true, result.errors.join('\n'));
-    assert.match(result.warnings.join('\n'), /only 4\.2; animations and skins work on a \.json only; the \.skel is kept as it is/);
+    assert.match(
+      result.warnings.join('\n'),
+      /only 4\.1 and 4\.2; animations and skins work on a \.json only; the \.skel is kept as it is/
+    );
     assert.deepEqual([...(await read('spine/hero/hero.skel'))], [0x53, 0x4b, 0x45, 0x4c, 0x00, 0x04, 0x01, 0x00]);
   });
 });
